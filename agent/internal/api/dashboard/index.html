@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NiteWatch — Who's Talking?</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131824; --line: #232a3a; --fg: #e6e9f0;
+    --muted: #8a93a6; --accent: #4da3ff; --new: #ffcf5c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 18px 22px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+  header .tag { color: var(--muted); font-size: 13px; }
+  .wrap { padding: 22px; max-width: 1100px; margin: 0 auto; }
+  .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; min-width: 150px; }
+  .card .n { font-size: 24px; font-weight: 600; }
+  .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .controls { margin-bottom: 12px; }
+  input[type=search] { width: 100%; padding: 10px 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  tr:last-child td { border-bottom: none; }
+  td.domain { color: var(--accent); }
+  td.raw { color: var(--muted); font-style: italic; }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NiteWatch</h1>
+  <span class="tag">Who's talking? — outbound connection ledger</span>
+</header>
+<div class="wrap">
+  <div class="cards">
+    <div class="card"><div class="n" id="c-total">–</div><div class="l">Connections</div></div>
+    <div class="card"><div class="n" id="c-talkers">–</div><div class="l">Processes</div></div>
+    <div class="card"><div class="n" id="c-domains">–</div><div class="l">Destinations</div></div>
+  </div>
+  <div class="controls">
+    <input type="search" id="filter" placeholder="Filter by process, domain, or IP…" autocomplete="off">
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>Process</th><th>Destination</th><th>IP:Port</th><th>Proto</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="empty" class="empty" hidden>No connections recorded yet.</div>
+  <div class="foot">Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+</div>
+<script>
+  let all = [];
+  const $ = (id) => document.getElementById(id);
+
+  function shortImage(p) {
+    if (!p) return "(unknown)";
+    const parts = p.split(/[\\/]/);
+    return parts[parts.length - 1] || p;
+  }
+  function fmtTime(t) {
+    const d = new Date(t);
+    return isNaN(d) ? t : d.toLocaleString();
+  }
+  function render() {
+    const q = $("filter").value.toLowerCase();
+    const rows = all.filter(c =>
+      !q || (c.image && c.image.toLowerCase().includes(q)) ||
+      (c.domain && c.domain.toLowerCase().includes(q)) ||
+      (c.remoteIP && c.remoteIP.toLowerCase().includes(q)));
+    const tb = $("rows");
+    tb.innerHTML = "";
+    for (const c of rows) {
+      const tr = document.createElement("tr");
+      const dest = c.domain
+        ? `<td class="domain" title="${c.domain}">${c.domain}</td>`
+        : `<td class="raw">— raw IP —</td>`;
+      tr.innerHTML =
+        `<td>${fmtTime(c.time)}</td>` +
+        `<td title="${c.image || ""}">${shortImage(c.image)}</td>` +
+        dest +
+        `<td>${c.remoteIP || ""}:${c.remotePort || 0}</td>` +
+        `<td>${c.proto || ""}</td>`;
+      tb.appendChild(tr);
+    }
+    $("empty").hidden = rows.length > 0;
+    $("c-total").textContent = all.length;
+    $("c-talkers").textContent = new Set(all.map(c => c.image)).size;
+    $("c-domains").textContent = new Set(all.map(c => c.domain || c.remoteIP)).size;
+  }
+  async function refresh() {
+    try {
+      const r = await fetch("/api/connections?limit=1000");
+      all = await r.json() || [];
+      render();
+    } catch (e) { /* keep last view on transient error */ }
+  }
+  $("filter").addEventListener("input", render);
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>

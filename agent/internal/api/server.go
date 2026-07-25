@@ -4,13 +4,18 @@
 package api
 
 import (
+	"embed"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 )
+
+//go:embed dashboard
+var dashboardFS embed.FS
 
 // DefaultAddr is the loopback address the dashboard/API listens on.
 const DefaultAddr = "127.0.0.1:8973"
@@ -48,6 +53,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
+
+	// Serve the embedded dashboard at "/". The embed root includes the
+	// "dashboard" dir, so strip it to a clean file server.
+	sub, err := fs.Sub(dashboardFS, "dashboard")
+	if err == nil {
+		mux.Handle("/", http.FileServer(http.FS(sub)))
+	}
 	return mux
 }
 
