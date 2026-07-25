@@ -175,7 +175,8 @@ at 3am, kid. Here's who.").
 **Naming note:** trademark screen still to be done before public launch. Known
 neighbors: Nightwatch.js (BrowserStack browser-testing framework — different category;
 NiteWatch spelling further separates), sentry.io (avoided entirely). **Branding: product
-under the ThreatTape parent — "ThreatTape NiteWatch," nitewatch.threattape.com.**
+under the ThreatTape parent — "ThreatTape NiteWatch," product page at
+www.threattape.com/products/nitewatch.html.**
 
 ## Open Items
 
@@ -189,10 +190,13 @@ under the ThreatTape parent — "ThreatTape NiteWatch," nitewatch.threattape.com
       clear. Domains: nitewatch.io / nitewatch.dev / getnitewatch.com AVAILABLE;
       nitewatch.com registered since 2001 (GoDaddy, likely parked/broker);
       nitewatch.app taken. **Decision (2026-07-24): ship as a product under the
-      ThreatTape parent brand** — "ThreatTape NiteWatch," hosted at
-      nitewatch.threattape.com. No standalone domain purchases or intent-to-use
-      filing for now; revisit standalone branding (domains + Sparks clearance +
-      ITU filing) if/when NiteWatch grows into its own go-to-market.
+      ThreatTape parent brand** — "ThreatTape NiteWatch," with its product page at
+      **www.threattape.com/products/nitewatch.html** alongside the other portfolio
+      products (page authored in the threattape repo, not this one, and only once
+      there's a real product to show — marketing-honesty rule). No standalone
+      domain purchases or intent-to-use filing for now; revisit standalone branding
+      (domains + Sparks clearance + ITU filing) if/when NiteWatch grows into its
+      own go-to-market.
 - [ ] Evaluate Go ETW consumer libraries (e.g. bi-zone/etw, 0xrawsec/golang-etw) vs
       wrapping `krabsetw`-style sessions directly
 - [ ] Verify GoRapide poset throughput against a realistic consumer ETW event rate;
