@@ -27,6 +27,28 @@ func TestChildProcessLinksToParent(t *testing.T) {
 	}
 }
 
+func TestConnectionResolvesDomainFromDNS(t *testing.T) {
+	g := New()
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: 100, Image: "browser.exe"})
+	dns := g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindDNSQuery, PID: 100, QueryName: "cdn.example.net", Answers: []string{"93.184.216.34"}})
+	cid := g.Ingest(event.NormalizedEvent{Seq: 3, Kind: event.KindNetConnect, PID: 100, RemoteIP: "93.184.216.34", RemotePort: 443})
+	if got := g.DomainFor(cid); got != "cdn.example.net" {
+		t.Fatalf("want cdn.example.net, got %q", got)
+	}
+	if !g.Poset().IsCausallyBefore(dns, cid) {
+		t.Fatal("connection should be causally after the DNS resolution that produced its IP")
+	}
+}
+
+func TestConnectionWithoutDNSHasNoDomain(t *testing.T) {
+	g := New()
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: 100, Image: "malware.exe"})
+	cid := g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindNetConnect, PID: 100, RemoteIP: "185.4.3.2", RemotePort: 443})
+	if got := g.DomainFor(cid); got != "" {
+		t.Fatalf("raw-IP connection should have no domain, got %q", got)
+	}
+}
+
 func TestProcExitClearsLineage(t *testing.T) {
 	g := New()
 	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: 100, Image: "a.exe"})

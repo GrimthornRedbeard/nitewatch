@@ -10,15 +10,31 @@ import (
 )
 
 type Graph struct {
-	p        *gr.Poset
-	procNode map[uint32]gr.EventID // PID -> latest live process node
+	p          *gr.Poset
+	procNode   map[uint32]gr.EventID // PID -> latest live process node
+	dnsByIP    map[string]dnsRecord  // resolved IP -> most-recent resolution
+	connDomain map[gr.EventID]string // connection node -> domain it dialed
+}
+
+type dnsRecord struct {
+	name string
+	node gr.EventID
 }
 
 func New() *Graph {
-	return &Graph{p: gr.NewPoset(), procNode: make(map[uint32]gr.EventID)}
+	return &Graph{
+		p:          gr.NewPoset(),
+		procNode:   make(map[uint32]gr.EventID),
+		dnsByIP:    make(map[string]dnsRecord),
+		connDomain: make(map[gr.EventID]string),
+	}
 }
 
 func (g *Graph) Poset() *gr.Poset { return g.p }
+
+// DomainFor returns the domain a connection node dialed, joined from a prior
+// DNS resolution, or "" if the connection went to a raw IP with no lookup.
+func (g *Graph) DomainFor(id gr.EventID) string { return g.connDomain[id] }
 
 // Ingest adds one normalized event to the poset, wiring causal edges, and
 // returns the new node's EventID.
@@ -43,6 +59,21 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 		g.procNode[e.PID] = ev.ID
 	case event.KindProcExit:
 		delete(g.procNode, e.PID)
+	case event.KindDNSQuery:
+		if proc, ok := g.procNode[e.PID]; ok {
+			_ = g.p.AddCausal(proc, ev.ID)
+		}
+		for _, ip := range e.Answers {
+			g.dnsByIP[ip] = dnsRecord{name: e.QueryName, node: ev.ID}
+		}
+	case event.KindNetConnect:
+		if proc, ok := g.procNode[e.PID]; ok {
+			_ = g.p.AddCausal(proc, ev.ID)
+		}
+		if rec, ok := g.dnsByIP[e.RemoteIP]; ok {
+			g.connDomain[ev.ID] = rec.name
+			_ = g.p.AddCausal(rec.node, ev.ID)
+		}
 	default:
 		if proc, ok := g.procNode[e.PID]; ok {
 			_ = g.p.AddCausal(proc, ev.ID)
