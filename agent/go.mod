@@ -8,6 +8,8 @@ require (
 )
 
 require (
+	github.com/0xrawsec/golang-etw v1.6.2 // indirect
+	github.com/0xrawsec/golang-utils v1.3.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
