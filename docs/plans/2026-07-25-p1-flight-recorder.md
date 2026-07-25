@@ -703,6 +703,32 @@ Tie it together: `nitewatch --serve` (real ETW source on Windows) and `nitewatch
 
 ---
 
+## Status — COMPLETE 2026-07-25
+
+All tasks implemented, committed, and verified on WSL2:
+
+| Task | Status | Notes |
+|---|---|---|
+| 0 Module + CI | ✅ | Go 1.22 module, agent CI workflow |
+| 1 NormalizedEvent | ✅ | JSON-tagged vocabulary |
+| 2 EventSource + replay | ✅ | JSONL replay drives all tests |
+| 3 Causal graph | ✅ | process/child/network wiring |
+| 4 DNS→IP join | ✅ | domain resolution + causal edge |
+| 5 SQLite ledger | ✅ | CGO-free, verified `CGO_ENABLED=0` |
+| 6 Rolling window | ✅ | rotate + re-seed live procs |
+| 7 Collector | ✅ | end-to-end replay→ledger test |
+| 8 ETW source | ✅* | 0xrawsec/golang-etw; cross-compiles; *VM smoke test pending |
+| 9 Loopback API | ✅ | 127.0.0.1-only, `/api/connections` + `/api/talkers` |
+| 10 Dashboard | ✅ | embedded vanilla HTML (SvelteKit deferred to P2) |
+| 11 Main wiring | ✅ | replay + ETW run modes, graceful shutdown |
+
+Full suite green under `-race`; `go vet` clean for linux + windows; 15MB static
+CGO-free exe. Replay-mode smoke test confirmed: connection surfaces with its
+DNS-joined domain over the loopback API and dashboard.
+
+**Remaining before P1 is fully signed off:** the manual Windows-VM smoke test
+(Task 8, `agent/internal/source/README.md`) — Kevin runs this when ready.
+
 ## Definition of Done (P1)
 
 - `go test ./... -race` green; `GOOS=windows` build green in CI.

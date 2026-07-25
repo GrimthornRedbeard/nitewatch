@@ -19,8 +19,38 @@ English with a one-click fix.
 
 ## Status
 
-Pre-implementation. Design validated 2026-07-24 — see
-[docs/plans/2026-07-24-nitewatch-design.md](docs/plans/2026-07-24-nitewatch-design.md).
+**P1 "Flight Recorder" implemented** (2026-07-25) — the causally-enriched,
+process-attributed connection ledger + "Who's talking?" dashboard. Detections,
+alerts, and response actions come in P2+.
+
+- Design: [docs/plans/2026-07-24-nitewatch-design.md](docs/plans/2026-07-24-nitewatch-design.md)
+- P1 plan + status: [docs/plans/2026-07-25-p1-flight-recorder.md](docs/plans/2026-07-25-p1-flight-recorder.md)
+
+## Running it
+
+Build (pure-Go, single static exe, no CGO):
+
+```bash
+cd agent && CGO_ENABLED=0 go build -o nitewatch ./cmd/nitewatch
+```
+
+**Dev/demo (any OS)** — replay a recorded trace and serve the dashboard:
+
+```bash
+./nitewatch --replay testdata/traces/basic.jsonl --serve
+```
+
+Then open <http://127.0.0.1:8973>.
+
+**Windows (live)** — run the built `nitewatch.exe` **elevated**:
+
+```
+nitewatch.exe --serve
+```
+
+ETW requires Administrator. On non-Windows the live source is unavailable — use
+`--replay`. See [agent/internal/source/README.md](agent/internal/source/README.md)
+for the Windows-VM smoke test.
 
 ## Layout (planned)
 
