@@ -1,0 +1,23 @@
+# Go
+*.exe
+*.dll
+*.test
+*.out
+/agent/bin/
+
+# Node / SvelteKit
+node_modules/
+/dashboard/.svelte-kit/
+/dashboard/build/
+
+# Local state
+*.db
+*.sqlite
+.env
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
