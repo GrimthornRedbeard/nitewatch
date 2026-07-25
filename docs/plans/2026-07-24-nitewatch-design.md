@@ -179,7 +179,17 @@ getnitewatch.com, nitewatch.threattape.com.
 
 ## Open Items
 
-- [ ] Trademark/domain collision sweep for "NiteWatch"
+- [x] Trademark/domain collision sweep for "NiteWatch" — **informal sweep done
+      2026-07-24, verdict: clearable.** Both USPTO NITEWATCH filings are DEAD:
+      86965672 (As Seen On PC LLC, solar flood lights, Class 11, abandoned 2017) and
+      86599644 (4NSYS Co., DVR/CCTV/digital-security software, Class 9, abandoned
+      2016 — closest in class, and dead). Live commercial use: "NITEWATCH PRO" solar
+      flood light on Amazon (Touch of ECO — physical lighting goods, low conflict).
+      No live software/security product uses the name; GitHub namespace effectively
+      clear. Domains: nitewatch.io / nitewatch.dev / getnitewatch.com AVAILABLE;
+      nitewatch.com registered since 2001 (GoDaddy, likely parked/broker);
+      nitewatch.app taken. Remaining: register domains, formal attorney clearance
+      (Sparks) + intent-to-use filing (Class 9/42) before public launch.
 - [ ] Evaluate Go ETW consumer libraries (e.g. bi-zone/etw, 0xrawsec/golang-etw) vs
       wrapping `krabsetw`-style sessions directly
 - [ ] Verify GoRapide poset throughput against a realistic consumer ETW event rate;
