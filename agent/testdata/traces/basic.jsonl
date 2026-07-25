@@ -1,0 +1,4 @@
+{"seq":1,"kind":"ProcStart","time":"2026-07-25T10:00:00Z","pid":100,"ppid":8,"image":"C:\\Program Files\\BrowserCo\\browser.exe"}
+{"seq":2,"kind":"DNSQuery","time":"2026-07-25T10:00:01Z","pid":100,"image":"C:\\Program Files\\BrowserCo\\browser.exe","queryName":"cdn.example.net","answers":["93.184.216.34"]}
+{"seq":3,"kind":"NetConnect","time":"2026-07-25T10:00:01Z","pid":100,"image":"C:\\Program Files\\BrowserCo\\browser.exe","remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}
+{"seq":4,"kind":"ProcStart","time":"2026-07-25T10:00:05Z","pid":220,"ppid":100,"image":"C:\\Users\\kevin\\Downloads\\invoice.exe"}
