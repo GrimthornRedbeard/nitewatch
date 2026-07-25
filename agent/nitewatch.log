@@ -1,0 +1,5 @@
+2026/07/25 15:33:44 logging to nitewatch.log
+2026/07/25 15:33:44 NiteWatch agent 0.1.0-dev
+2026/07/25 15:33:44 ledger: /tmp/nw2.db
+2026/07/25 15:33:44 dashboard: http://127.0.0.1:8973
+2026/07/25 15:33:44 source: replay /home/grimmy/Projects/nitewatch/agent/testdata/traces/basic.jsonl

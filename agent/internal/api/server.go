@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
@@ -23,10 +24,28 @@ const DefaultAddr = "127.0.0.1:8973"
 type Server struct {
 	ledger *ledger.DB
 	addr   string
+
+	mu     sync.RWMutex
+	status Status
+}
+
+// Status describes the agent's live telemetry state for the dashboard banner.
+type Status struct {
+	Source   string `json:"source"`   // "live-etw" | "replay" | "none"
+	Running  bool   `json:"running"`  // is telemetry actually flowing?
+	Elevated bool   `json:"elevated"` // process has admin (live source needs it)
+	Message  string `json:"message"`  // human-readable note / error
 }
 
 func New(led *ledger.DB) *Server {
 	return &Server{ledger: led, addr: DefaultAddr}
+}
+
+// SetStatus updates the telemetry status shown to the dashboard.
+func (s *Server) SetStatus(st Status) {
+	s.mu.Lock()
+	s.status = st
+	s.mu.Unlock()
 }
 
 // Addr is the loopback address the server binds.
@@ -53,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
+	mux.HandleFunc("/api/status", s.handleStatus)
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -114,6 +134,13 @@ func (s *Server) handleTalkers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, talkerDTO{Image: img, Count: counts[img]})
 	}
 	writeJSON(w, out)
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	st := s.status
+	s.mu.RUnlock()
+	writeJSON(w, st)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

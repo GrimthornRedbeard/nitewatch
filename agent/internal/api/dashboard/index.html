@@ -35,6 +35,10 @@
   td.raw { color: var(--muted); font-style: italic; }
   .empty { color: var(--muted); padding: 30px; text-align: center; }
   .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
+  .banner { display: none; margin: 0 0 18px; padding: 12px 16px; border-radius: 10px;
+    border: 1px solid #6a4a00; background: #2a2000; color: var(--new); }
+  .banner.show { display: block; }
+  .banner b { color: #fff; }
 </style>
 </head>
 <body>
@@ -43,6 +47,7 @@
   <span class="tag">Who's talking? — outbound connection ledger</span>
 </header>
 <div class="wrap">
+  <div id="banner" class="banner"></div>
   <div class="cards">
     <div class="card"><div class="n" id="c-total">–</div><div class="l">Connections</div></div>
     <div class="card"><div class="n" id="c-talkers">–</div><div class="l">Processes</div></div>
@@ -97,12 +102,28 @@
     $("c-talkers").textContent = new Set(all.map(c => c.image)).size;
     $("c-domains").textContent = new Set(all.map(c => c.domain || c.remoteIP)).size;
   }
+  async function refreshStatus() {
+    try {
+      const st = await (await fetch("/api/status")).json();
+      const b = $("banner");
+      if (st.running) { b.className = "banner"; return; }
+      b.className = "banner show";
+      if (st.source === "live-etw" && !st.elevated) {
+        b.innerHTML = "<b>NiteWatch needs Administrator to watch this PC.</b> " +
+          "The live sensor (ETW) requires elevation. Close this, right-click " +
+          "nitewatch.exe (or run-nitewatch.bat) and choose <b>Run as administrator</b>.";
+      } else {
+        b.innerHTML = "<b>No live telemetry.</b> " + (st.message || "Sensor is not running.");
+      }
+    } catch (e) { /* ignore */ }
+  }
   async function refresh() {
     try {
       const r = await fetch("/api/connections?limit=1000");
       all = await r.json() || [];
       render();
     } catch (e) { /* keep last view on transient error */ }
+    refreshStatus();
   }
   $("filter").addEventListener("input", render);
   refresh();

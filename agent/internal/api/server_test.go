@@ -49,6 +49,23 @@ func TestTalkersEndpoint(t *testing.T) {
 	}
 }
 
+func TestStatusEndpointReflectsSetStatus(t *testing.T) {
+	srv := newTestServer(t)
+	srv.SetStatus(Status{Source: "live-etw", Running: false, Elevated: false, Message: "need admin"})
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/status", nil))
+	if rr.Code != 200 {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "live-etw") || !strings.Contains(body, "need admin") {
+		t.Fatalf("status body missing fields: %s", body)
+	}
+	if !strings.Contains(body, `"running":false`) {
+		t.Fatalf("running flag not serialized: %s", body)
+	}
+}
+
 func TestLoopbackOnlyAddr(t *testing.T) {
 	srv := newTestServer(t)
 	if !strings.HasPrefix(srv.Addr(), "127.0.0.1:") {

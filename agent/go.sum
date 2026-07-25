@@ -2,6 +2,8 @@ github.com/0xrawsec/golang-etw v1.6.2 h1:ZXOEL2+hfWBz7QK3iSPVhKeB1VYjz47xGl/Wfdq
 github.com/0xrawsec/golang-etw v1.6.2/go.mod h1:nTLqX2X4dxf/XpYiFmVfWSrjER/CO3A1WOsvc8cac6I=
 github.com/0xrawsec/golang-utils v1.3.1 h1:jjiBzsxzcQPkmEV5KONJY4OnCoqTTW1eQMJcpSdk3hw=
 github.com/0xrawsec/golang-utils v1.3.1/go.mod h1:DADTtCFY10qXjWmUVhhJqQIZdSweaHH4soYUDEi8mj0=
+github.com/0xrawsec/toast v1.2.3 h1:nTs5NyAdmSoDfxlYjMVMYb9wj3C/MFpnoIoQBPUsHXg=
+github.com/0xrawsec/toast v1.2.3/go.mod h1:sRvfNYxqVoH1sZnE18s9Knm/lkbarTGNvaNVBf2/h1k=
 github.com/ShaneDolphin/gorapide v0.0.0-20260712235008-08752c7ea938 h1:K9wmLEnP318RPIes/kLyjcafEeCqUAeRbyUAwvcJ+Vg=
 github.com/ShaneDolphin/gorapide v0.0.0-20260712235008-08752c7ea938/go.mod h1:hVrsEXFJrcxYkJ4j0suHGRrSVmD5BSpg9WOigcJYhII=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
