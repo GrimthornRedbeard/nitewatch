@@ -46,10 +46,12 @@ func baseDir() string {
 
 func main() {
 	var (
-		replayPath = flag.String("replay", "", "replay events from a .jsonl trace instead of live ETW")
-		serve      = flag.Bool("serve", true, "serve the localhost dashboard + API")
-		open       = flag.Bool("open", true, "open the dashboard in a browser when serving (Windows)")
-		dbPath     = flag.String("db", filepath.Join(baseDir(), "nitewatch.db"), "path to the connection ledger database")
+		replayPath   = flag.String("replay", "", "replay events from a .jsonl trace instead of live ETW")
+		serve        = flag.Bool("serve", true, "serve the localhost dashboard + API")
+		open         = flag.Bool("open", true, "open the dashboard in a browser when serving (Windows)")
+		dbPath       = flag.String("db", filepath.Join(baseDir(), "nitewatch.db"), "path to the connection ledger database")
+		includeLocal = flag.Bool("include-local", false, "also record loopback/private/link-local destinations (noisy)")
+		noResolve    = flag.Bool("no-resolve", false, "disable reverse-DNS lookup of destinations")
 	)
 	flag.Parse()
 
@@ -71,14 +73,19 @@ func main() {
 		log.Printf("env: exe=%s", exe)
 	}
 
-	if err := run(*replayPath, *serve, *open, *dbPath); err != nil {
+	opts := collector.Options{
+		IncludeLocal: *includeLocal,
+		ResolveNames: !*noResolve,
+		ImageLookup:  platform.ProcessImage,
+	}
+	if err := run(*replayPath, *serve, *open, *dbPath, opts); err != nil {
 		log.Printf("fatal: %v", err)
 		holdOpen()
 		os.Exit(1)
 	}
 }
 
-func run(replayPath string, serve, open bool, dbPath string) error {
+func run(replayPath string, serve, open bool, dbPath string, opts collector.Options) error {
 	if dir := filepath.Dir(dbPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create ledger dir %q: %w", dir, err)
@@ -142,7 +149,8 @@ func run(replayPath string, serve, open bool, dbPath string) error {
 		})
 	}
 
-	coll := collector.New(src, led)
+	log.Printf("options: include-local=%v resolve-names=%v", opts.IncludeLocal, opts.ResolveNames)
+	coll := collector.NewWithOptions(src, led, opts)
 	collErr := make(chan error, 1)
 	go func() { collErr <- coll.Run(ctx) }()
 

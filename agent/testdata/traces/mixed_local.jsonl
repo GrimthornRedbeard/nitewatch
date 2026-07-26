@@ -1,0 +1,4 @@
+{"seq":1,"kind":"NetConnect","time":"2026-07-25T22:00:00Z","pid":4242,"remoteIP":"127.0.0.1","remotePort":49505,"proto":"TCP"}
+{"seq":2,"kind":"NetConnect","time":"2026-07-25T22:00:01Z","pid":4242,"remoteIP":"192.168.1.66","remotePort":61519,"proto":"TCP"}
+{"seq":3,"kind":"NetConnect","time":"2026-07-25T22:00:02Z","pid":4242,"remoteIP":"fe80::f907:c770:be3a:a372","remotePort":22,"proto":"TCP"}
+{"seq":4,"kind":"NetConnect","time":"2026-07-25T22:00:03Z","pid":4242,"remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}

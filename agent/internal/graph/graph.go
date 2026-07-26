@@ -12,6 +12,7 @@ import (
 type Graph struct {
 	p          *gr.Poset
 	procNode   map[uint32]gr.EventID // PID -> latest live process node
+	procImage  map[uint32]string     // PID -> image path of the live process
 	dnsByIP    map[string]dnsRecord  // resolved IP -> most-recent resolution
 	connDomain map[gr.EventID]string // connection node -> domain it dialed
 }
@@ -25,12 +26,18 @@ func New() *Graph {
 	return &Graph{
 		p:          gr.NewPoset(),
 		procNode:   make(map[uint32]gr.EventID),
+		procImage:  make(map[uint32]string),
 		dnsByIP:    make(map[string]dnsRecord),
 		connDomain: make(map[gr.EventID]string),
 	}
 }
 
 func (g *Graph) Poset() *gr.Poset { return g.p }
+
+// ImageFor returns the image path of the live process with this PID, or "" if
+// unknown. Network/file events carry a PID but no image, so attribution comes
+// from the ProcStart the graph already recorded.
+func (g *Graph) ImageFor(pid uint32) string { return g.procImage[pid] }
 
 // DomainFor returns the domain a connection node dialed, joined from a prior
 // DNS resolution, or "" if the connection went to a raw IP with no lookup.
@@ -57,8 +64,12 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 			}
 		}
 		g.procNode[e.PID] = ev.ID
+		if e.Image != "" {
+			g.procImage[e.PID] = e.Image
+		}
 	case event.KindProcExit:
 		delete(g.procNode, e.PID)
+		delete(g.procImage, e.PID)
 	case event.KindDNSQuery:
 		if proc, ok := g.procNode[e.PID]; ok {
 			_ = g.p.AddCausal(proc, ev.ID)

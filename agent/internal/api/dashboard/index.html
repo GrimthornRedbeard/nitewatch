@@ -72,6 +72,14 @@
     const parts = p.split(/[\\/]/);
     return parts[parts.length - 1] || p;
   }
+  function hostPort(ip, port) {
+    if (!ip) return "";
+    return (ip.includes(":") ? "[" + ip + "]" : ip) + ":" + (port || 0);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+  }
   function fmtTime(t) {
     const d = new Date(t);
     return isNaN(d) ? t : d.toLocaleString();
@@ -87,14 +95,14 @@
     for (const c of rows) {
       const tr = document.createElement("tr");
       const dest = c.domain
-        ? `<td class="domain" title="${c.domain}">${c.domain}</td>`
-        : `<td class="raw">— raw IP —</td>`;
+        ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
+        : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
       tr.innerHTML =
-        `<td>${fmtTime(c.time)}</td>` +
-        `<td title="${c.image || ""}">${shortImage(c.image)}</td>` +
+        `<td>${esc(fmtTime(c.time))}</td>` +
+        `<td title="${esc(c.image)}">${esc(shortImage(c.image))}</td>` +
         dest +
-        `<td>${c.remoteIP || ""}:${c.remotePort || 0}</td>` +
-        `<td>${c.proto || ""}</td>`;
+        `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
+        `<td>${esc(c.proto)}</td>`;
       tb.appendChild(tr);
     }
     $("empty").hidden = rows.length > 0;

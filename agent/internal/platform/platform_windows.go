@@ -34,3 +34,27 @@ func IsElevated() bool {
 func OpenBrowser(url string) error {
 	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
+
+// ProcessImage returns the full image path for a running PID, or "" if it can't
+// be determined (process exited, or access denied for a protected process).
+//
+// This covers the case ETW alone cannot: processes that were already running
+// when the agent started have no ProcStart event, so their connections would
+// otherwise be unattributable.
+func ProcessImage(pid uint32) string {
+	if pid == 0 {
+		return ""
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return ""
+	}
+	defer windows.CloseHandle(h)
+
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:size])
+}

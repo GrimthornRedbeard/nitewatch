@@ -9,3 +9,7 @@ func IsElevated() bool { return false }
 
 // OpenBrowser is a no-op off Windows (dev uses --replay and opens the URL by hand).
 func OpenBrowser(string) error { return nil }
+
+// ProcessImage is unavailable off Windows; replay traces carry their own image
+// paths, so nothing depends on it there.
+func ProcessImage(uint32) string { return "" }

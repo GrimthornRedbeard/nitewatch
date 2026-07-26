@@ -4,12 +4,41 @@ package source
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
 	"strconv"
 	"sync/atomic"
 
 	"github.com/0xrawsec/golang-etw/etw"
 	"github.com/threattape/nitewatch/agent/internal/event"
 )
+
+// debugETW dumps raw ETW records (field names + values) when NITEWATCH_DEBUG_ETW
+// is set. ETW property names vary across Windows builds, so this is the ground
+// truth used to fix field mappings without guessing.
+var debugETW = os.Getenv("NITEWATCH_DEBUG_ETW") != ""
+
+var debugCount atomic.Int64
+
+const debugMaxRecords = 60
+
+func dumpRecord(e *etw.Event) {
+	if n := debugCount.Add(1); n > debugMaxRecords {
+		return
+	}
+	b, _ := json.Marshal(map[string]any{
+		"provider":  e.System.Provider.Name,
+		"eventID":   e.System.EventID,
+		"opcode":    e.System.Opcode.Name,
+		"task":      e.System.Task.Name,
+		"execPID":   e.System.Execution.ProcessID,
+		"eventData": e.EventData,
+		"userData":  e.UserData,
+	})
+	log.Printf("ETW_RAW %s", b)
+}
 
 // etwProviders are the userland ETW providers the flight recorder subscribes to.
 // No kernel driver is involved — these are all consumable from an elevated
@@ -76,6 +105,10 @@ func (s *etwSource) Events(ctx context.Context) (<-chan event.NormalizedEvent, e
 // normalize maps a parsed ETW event into a NormalizedEvent. It keys off the
 // provider channel + opcode; unknown events are dropped (ok=false).
 func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
+	if debugETW {
+		dumpRecord(e)
+	}
+
 	ne := event.NormalizedEvent{
 		Seq:   s.seq.Add(1),
 		Time:  e.System.TimeCreated.SystemTime,
@@ -87,33 +120,59 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 		switch e.System.Opcode.Name {
 		case "Start":
 			ne.Kind = event.KindProcStart
-			ne.PID = u32(e.EventData, "ProcessID", ne.PID)
-			ne.PPID = u32(e.EventData, "ParentProcessID", 0)
-			ne.Image = str(e.EventData, "ImageName")
+			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")
+			ne.PPID = u32(e.EventData, 0, "ParentProcessID", "ParentPID")
+			ne.Image = str(e.EventData, "ImageName", "ImagePath", "ProcessName")
 		case "End":
 			ne.Kind = event.KindProcExit
-			ne.PID = u32(e.EventData, "ProcessID", ne.PID)
+			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")
 		default:
 			return ne, false
 		}
 	case "Microsoft-Windows-Kernel-Network":
 		ne.Kind = event.KindNetConnect
-		ne.RemoteIP = firstNonEmpty(str(e.EventData, "daddr"), str(e.EventData, "DestinationIp"))
-		ne.RemotePort = u16(e.EventData, "dport", u16(e.EventData, "DestinationPort", 0))
-		ne.Proto = "TCP"
-	case "Microsoft-Windows-DNS-Client":
+		// The acting process is in the payload ("PID"), NOT the execution
+		// context — Kernel-Network events are often reported from a system
+		// thread, which is why execution ProcessID yields the wrong owner.
+		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
+		ne.RemoteIP = str(e.EventData, "daddr", "DestinationIp", "DestAddr", "RemoteAddress")
+		ne.RemotePort = u16(e.EventData, 0, "dport", "DestinationPort", "DestPort", "RemotePort")
+		ne.Proto = netProto(e)
+		if ne.RemoteIP == "" {
+			return ne, false // nothing useful without a destination
+		}
+	case "Microsoft-Windows-DNS-Client", "Microsoft-Windows-DNS-Client-Operational":
 		ne.Kind = event.KindDNSQuery
-		ne.QueryName = str(e.EventData, "QueryName")
-		if ans := str(e.EventData, "QueryResults"); ans != "" {
+		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
+		ne.QueryName = str(e.EventData, "QueryName", "DnsQueryName", "Name")
+		if ans := str(e.EventData, "QueryResults", "DnsQueryResults", "QueryResult"); ans != "" {
 			ne.Answers = parseDNSAnswers(ans)
+		}
+		if ne.QueryName == "" {
+			return ne, false
 		}
 	case "Microsoft-Windows-Kernel-File":
 		ne.Kind = event.KindFileWrite
-		ne.Path = str(e.EventData, "FileName")
+		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
+		ne.Path = str(e.EventData, "FileName", "FilePath", "OpenPath")
 	default:
 		return ne, false
 	}
 	return ne, true
+}
+
+// netProto distinguishes TCP from UDP using the event task/opcode name, which
+// carries it on Kernel-Network ("KERNEL_NETWORK_TASK_UDPIP" vs "...TCPIP").
+func netProto(e *etw.Event) string {
+	name := e.System.Task.Name + " " + e.System.Opcode.Name
+	for i := 0; i+2 < len(name); i++ {
+		if (name[i] == 'U' || name[i] == 'u') &&
+			(name[i+1] == 'D' || name[i+1] == 'd') &&
+			(name[i+2] == 'P' || name[i+2] == 'p') {
+			return "UDP"
+		}
+	}
+	return "TCP"
 }
 
 func (s *etwSource) Close() error {
@@ -128,17 +187,34 @@ func (s *etwSource) Close() error {
 
 // --- EventData accessors (ETW property maps are stringly-typed) ---
 
-func str(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
+// str returns the first non-empty value among keys. ETW property names differ
+// across Windows builds, so every accessor takes candidates rather than one key.
+func str(m map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if t != "" {
+				return t
+			}
+		case fmt.Stringer:
+			if s := t.String(); s != "" {
+				return s
+			}
+		default:
+			if s := fmt.Sprintf("%v", v); s != "" && s != "<nil>" {
+				return s
+			}
 		}
 	}
 	return ""
 }
 
-func u32(m map[string]interface{}, key string, def uint32) uint32 {
-	if s := str(m, key); s != "" {
+func u32(m map[string]interface{}, def uint32, keys ...string) uint32 {
+	if s := str(m, keys...); s != "" {
 		if n, err := strconv.ParseUint(s, 0, 32); err == nil {
 			return uint32(n)
 		}
@@ -146,75 +222,11 @@ func u32(m map[string]interface{}, key string, def uint32) uint32 {
 	return def
 }
 
-func u16(m map[string]interface{}, key string, def uint16) uint16 {
-	if s := str(m, key); s != "" {
+func u16(m map[string]interface{}, def uint16, keys ...string) uint16 {
+	if s := str(m, keys...); s != "" {
 		if n, err := strconv.ParseUint(s, 0, 16); err == nil {
 			return uint16(n)
 		}
 	}
 	return def
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-// parseDNSAnswers extracts IP literals from the DNS-Client QueryResults field,
-// which is a ';'-separated list mixing "type: value" tokens.
-func parseDNSAnswers(raw string) []string {
-	var out []string
-	start := 0
-	for i := 0; i <= len(raw); i++ {
-		if i == len(raw) || raw[i] == ';' {
-			tok := raw[start:i]
-			if c := lastColon(tok); c >= 0 {
-				tok = tok[c+1:]
-			}
-			tok = trimSpace(tok)
-			if looksLikeIP(tok) {
-				out = append(out, tok)
-			}
-			start = i + 1
-		}
-	}
-	return out
-}
-
-func lastColon(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return i
-		}
-	}
-	return -1
-}
-
-func trimSpace(s string) string {
-	for len(s) > 0 && s[0] == ' ' {
-		s = s[1:]
-	}
-	for len(s) > 0 && s[len(s)-1] == ' ' {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-func looksLikeIP(s string) bool {
-	dots, colons := 0, 0
-	for i := 0; i < len(s); i++ {
-		switch {
-		case s[i] == '.':
-			dots++
-		case s[i] == ':':
-			colons++
-		case s[i] >= '0' && s[i] <= '9':
-		case (s[i] >= 'a' && s[i] <= 'f') || (s[i] >= 'A' && s[i] <= 'F'):
-		default:
-			return false
-		}
-	}
-	return (dots == 3 || colons >= 2) && len(s) > 0
 }
