@@ -49,6 +49,53 @@ CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_dedup ON alerts(rule_id, conn_id);
 `
 
+const allowSchema = `
+CREATE TABLE IF NOT EXISTS allowlist (
+	key   TEXT PRIMARY KEY,
+	ts    TEXT NOT NULL,
+	label TEXT NOT NULL DEFAULT ''
+);`
+
+// AddAllow persists a user's "always allow" decision.
+func (d *DB) AddAllow(key, label string, at time.Time) error {
+	_, err := d.sql.Exec(
+		`INSERT INTO allowlist (key, ts, label) VALUES (?, ?, ?)
+		 ON CONFLICT(key) DO NOTHING`, key, formatTS(at), label)
+	return err
+}
+
+// Allows returns every persisted allow key, so decisions survive restarts.
+func (d *DB) Allows() ([]string, error) {
+	rows, err := d.sql.Query(`SELECT key FROM allowlist`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+// AlertByID fetches one alert, used when acting on it.
+func (d *DB) AlertByID(id int64) (Alert, error) {
+	rows, err := d.RecentAlerts(1000)
+	if err != nil {
+		return Alert{}, err
+	}
+	for _, a := range rows {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return Alert{}, sql.ErrNoRows
+}
+
 // RecordAlert stores an alert, ignoring a repeat of the same rule on the same
 // connection. Returns whether a new alert was created.
 func (d *DB) RecordAlert(a Alert) (bool, error) {

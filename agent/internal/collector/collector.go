@@ -64,6 +64,7 @@ type Collector struct {
 	opts      Options
 
 	imageCache map[uint32]string
+	suppress   *detect.Suppressor
 
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
@@ -92,7 +93,21 @@ func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Colle
 		localNets:  resolve.DetectLocalNets(),
 		opts:       opts,
 		imageCache: make(map[uint32]string),
+		suppress:   detect.NewSuppressor(),
 	}
+}
+
+// Suppressor exposes the noise-control gates so the API can record user
+// "always allow" decisions against the same instance the collector consults.
+func (c *Collector) Suppressor() *detect.Suppressor { return c.suppress }
+
+// LoadAllows restores persisted allow decisions at startup.
+func (c *Collector) LoadAllows() {
+	keys, err := c.ledger.Allows()
+	if err != nil {
+		return
+	}
+	c.suppress.AddKeys(keys)
 }
 
 // Run consumes the source until its channel closes or ctx is cancelled.
@@ -201,7 +216,11 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 		HadDNS:       c.window.Current().DomainFor(c.lastID) != "",
 		FirstContact: c.firstContact,
 	}
+	c.suppress.Observe(conn.Image, e.Time)
 	for _, d := range c.opts.Detect.Evaluate(subject) {
+		if v := c.suppress.Check(d, subject, e.Time); v.Suppressed {
+			continue
+		}
 		created, err := c.ledger.RecordAlert(ledger.Alert{
 			Time:      e.Time,
 			RuleID:    d.Rule.ID,

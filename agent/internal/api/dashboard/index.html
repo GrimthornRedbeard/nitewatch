@@ -396,6 +396,7 @@
       ${steps ? `<ol>${steps}</ol>` : ""}
       <div class="act">
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
+        <button class="btn" data-allow="${a.id}" title="Stop warning about this program contacting this destination. Other programs and destinations are unaffected.">This is expected — always allow</button>
       </div>
     </div>`;
   }
@@ -405,6 +406,12 @@
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
       box.innerHTML = open.map(alertHTML).join("");
+      box.querySelectorAll("[data-allow]").forEach(b => {
+        b.addEventListener("click", async () => {
+          await fetch("/api/alerts/allow?id=" + encodeURIComponent(b.dataset.allow), {method: "POST"});
+          refreshAlerts();
+        });
+      });
       box.querySelectorAll("[data-ack]").forEach(b => {
         b.addEventListener("click", async () => {
           await fetch("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack), {method: "POST"});

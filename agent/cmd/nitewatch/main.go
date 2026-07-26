@@ -176,6 +176,10 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	log.Printf("settings: include-local=%v resolve-names=%v recon=%v dedup=%ds (editable in the dashboard)",
 		v.IncludeLocal, v.ResolveNames, v.Recon, v.DedupSeconds)
 	coll := collector.NewWithOptions(src, led, opts)
+	coll.LoadAllows()
+	if srv != nil {
+		srv.WithSuppressor(coll.Suppressor())
+	}
 	collErr := make(chan error, 1)
 	go func() { collErr <- coll.Run(ctx) }()
 

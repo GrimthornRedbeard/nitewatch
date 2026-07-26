@@ -74,6 +74,10 @@ func Open(path string) (*DB, error) {
 		h.Close()
 		return nil, err
 	}
+	if _, err := h.Exec(allowSchema); err != nil {
+		h.Close()
+		return nil, err
+	}
 	if _, err := h.Exec(alertSchema); err != nil {
 		h.Close()
 		return nil, err

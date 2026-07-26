@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 )
@@ -26,6 +27,7 @@ const DefaultAddr = "127.0.0.1:8973"
 type Server struct {
 	ledger   *ledger.DB
 	settings *settings.Store
+	suppress *detect.Suppressor
 	addr     string
 
 	mu     sync.RWMutex
@@ -42,6 +44,13 @@ type Status struct {
 
 func New(led *ledger.DB) *Server {
 	return &Server{ledger: led, addr: DefaultAddr}
+}
+
+// WithSuppressor lets the dashboard record "always allow" decisions against the
+// same gates the collector consults.
+func (s *Server) WithSuppressor(sup *detect.Suppressor) *Server {
+	s.suppress = sup
+	return s
 }
 
 // WithSettings enables the dashboard's configuration panel.
@@ -95,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/story", s.handleStory)
 	mux.HandleFunc("/api/alerts", s.handleAlerts)
 	mux.HandleFunc("/api/alerts/ack", s.handleAckAlert)
+	mux.HandleFunc("/api/alerts/allow", s.handleAllowAlert)
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -284,6 +294,39 @@ func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleAllowAlert records "stop telling me about this" for one specific
+// rule + program + destination, and acknowledges the alert.
+func (s *Server) handleAllowAlert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid id", http.StatusBadRequest)
+		return
+	}
+	a, err := s.ledger.AlertByID(id)
+	if err != nil {
+		http.Error(w, "no such alert", http.StatusNotFound)
+		return
+	}
+
+	image, _ := a.Evidence["ImagePath"].(string)
+	dest, _ := a.Evidence["Destination"].(string)
+	key := detect.Key(a.RuleID, image, dest)
+
+	if err := s.ledger.AddAllow(key, a.Title, time.Now()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.suppress != nil {
+		s.suppress.AddKeys([]string{key})
+	}
+	_ = s.ledger.AckAlert(id)
+	writeJSON(w, map[string]any{"ok": true, "allowed": key})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
