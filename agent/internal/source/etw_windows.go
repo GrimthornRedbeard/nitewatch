@@ -278,13 +278,41 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 		if name == "" || !interestingPath(name) {
 			return ne, false
 		}
-		ne.Kind = event.KindFileWrite
+		kind, ok := fileOperation(e.System.Task.Name)
+		if !ok {
+			return ne, false
+		}
+		ne.Kind = kind
 		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
 		ne.Path = normalizeImagePath(name)
 	default:
 		return ne, false
 	}
 	return ne, true
+}
+
+// fileOperation maps a Kernel-File task to what actually happened.
+//
+// Treating every file event as a write was a real defect: opening a file picker
+// on a folder of photos makes the shell read and thumbnail each one, which
+// produced a hundred "modified files" and a ransomware alert for the act of
+// choosing a picture to upload. Reads and writes answer different questions —
+// reads reveal credential theft, writes reveal encryption — and conflating them
+// breaks both.
+func fileOperation(task string) (event.Kind, bool) {
+	switch task {
+	case "Write", "SetInformation", "Rename", "RenamePath", "DeletePath",
+		"SetDelete", "Truncate", "SetSecurity", "CreateNewFile":
+		// CreateNewFile is a genuinely new file appearing, which is a write in
+		// every sense that matters here.
+		return event.KindFileWrite, true
+	case "Read", "Create", "QueryInformation", "QuerySecurity":
+		// Create is an OPEN, not a creation — the shell opens every file it
+		// thumbnails. Opening a credential store is exactly the read signal.
+		return event.KindFileRead, true
+	}
+	// NameCreate, OperationEnd, FSCTL, DirEnum and friends are bookkeeping.
+	return "", false
 }
 
 // fileNames maps ETW file keys to paths.

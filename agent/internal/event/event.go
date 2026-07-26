@@ -17,6 +17,11 @@ const (
 	KindNetConnect Kind = "NetConnect"
 	KindDNSQuery   Kind = "DNSQuery"
 	KindFileWrite  Kind = "FileWrite"
+	// KindFileRead is a file being OPENED OR READ, not modified. Kept distinct
+	// from FileWrite because the two answer different questions: reads reveal
+	// credential theft, writes reveal encryption. Conflating them made a file
+	// picker rendering thumbnails look like ransomware.
+	KindFileRead Kind = "FileRead"
 	// KindRegPersist is an autostart installation: a Run key, service, scheduled
 	// task, startup-folder drop, or WMI event subscription. Legitimate software
 	// does this at install time; implants do it to survive reboot.

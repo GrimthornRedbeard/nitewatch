@@ -238,9 +238,9 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		// names the wrong program on future connection rows — and the process
 		// name is the field users act on.
 		delete(c.imageCache, e.PID)
-	case event.KindFileWrite:
+	case event.KindFileWrite, event.KindFileRead:
 		if c.opts.Detect != nil && !selfEvent {
-			c.onFileWrite(e)
+			c.onFileEvent(e)
 		}
 		return
 	}
@@ -470,9 +470,9 @@ func (c *Collector) dedupWindow() time.Duration {
 	return c.opts.DedupWindow
 }
 
-// onFileWrite feeds file activity to the burst tracker and the credential
-// detector.
-func (c *Collector) onFileWrite(e event.NormalizedEvent) {
+// onFileEvent routes file activity by what actually happened. Reads answer
+// "is something stealing secrets?"; only writes can indicate encryption.
+func (c *Collector) onFileEvent(e event.NormalizedEvent) {
 	image := e.Image
 	if image == "" {
 		image = c.window.Current().ImageFor(e.PID)
@@ -481,7 +481,15 @@ func (c *Collector) onFileWrite(e event.NormalizedEvent) {
 		image = c.lookupImage(e.PID)
 	}
 
-	switch filewatch.Classify(e.Path) {
+	cat := filewatch.Classify(e.Path)
+
+	// Encryption is a WRITE pattern. Reading documents — a backup scanning, a
+	// picker thumbnailing, a search indexer — is not evidence of anything.
+	if e.Kind == event.KindFileRead && cat != filewatch.Credential {
+		return
+	}
+
+	switch cat {
 	case filewatch.Credential:
 		// Reading a secret store is judged on the spot: one read is the whole
 		// event, and waiting for a pattern would mean waiting until after the
