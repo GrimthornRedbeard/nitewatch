@@ -22,9 +22,15 @@
     padding: 14px 16px; min-width: 150px; }
   .card .n { font-size: 24px; font-weight: 600; }
   .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  .controls { margin-bottom: 12px; }
-  input[type=search] { width: 100%; padding: 10px 12px; background: var(--panel);
+  .controls { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input[type=search] { flex: 1 1 320px; padding: 10px 12px; background: var(--panel);
     border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-size: 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 10px 14px;
+    font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--accent); color: #05121f; font-weight: 600; }
+  td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   table { width: 100%; border-collapse: collapse; background: var(--panel);
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
@@ -55,9 +61,17 @@
   </div>
   <div class="controls">
     <input type="search" id="filter" placeholder="Filter by process, domain, or IP…" autocomplete="off">
+    <div class="seg" id="ipseg">
+      <button data-v="all" class="on">All</button>
+      <button data-v="4">IPv4</button>
+      <button data-v="6">IPv6</button>
+    </div>
   </div>
   <table>
-    <thead><tr><th>Time</th><th>Process</th><th>Destination</th><th>IP:Port</th><th>Proto</th></tr></thead>
+    <thead><tr>
+      <th>Last seen</th><th>Process</th><th>Destination</th><th>IP:Port</th>
+      <th>Proto</th><th title="Network events collapsed into this connection">Activity</th>
+    </tr></thead>
     <tbody id="rows"></tbody>
   </table>
   <div id="empty" class="empty" hidden>No connections recorded yet.</div>
@@ -84,12 +98,21 @@
     const d = new Date(t);
     return isNaN(d) ? t : d.toLocaleString();
   }
-  function render() {
+  let ipFilter = "all";
+
+  function visible() {
     const q = $("filter").value.toLowerCase();
-    const rows = all.filter(c =>
-      !q || (c.image && c.image.toLowerCase().includes(q)) ||
-      (c.domain && c.domain.toLowerCase().includes(q)) ||
-      (c.remoteIP && c.remoteIP.toLowerCase().includes(q)));
+    return all.filter(c => {
+      if (ipFilter !== "all" && String(c.ipVersion) !== ipFilter) return false;
+      if (!q) return true;
+      return (c.image && c.image.toLowerCase().includes(q)) ||
+             (c.domain && c.domain.toLowerCase().includes(q)) ||
+             (c.remoteIP && c.remoteIP.toLowerCase().includes(q));
+    });
+  }
+
+  function render() {
+    const rows = visible();
     const tb = $("rows");
     tb.innerHTML = "";
     for (const c of rows) {
@@ -98,18 +121,27 @@
         ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
         : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
       tr.innerHTML =
-        `<td>${esc(fmtTime(c.time))}</td>` +
+        `<td title="first seen ${esc(fmtTime(c.time))}">${esc(fmtTime(c.lastSeen || c.time))}</td>` +
         `<td title="${esc(c.image)}">${esc(shortImage(c.image))}</td>` +
         dest +
         `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
-        `<td>${esc(c.proto)}</td>`;
+        `<td>${esc(c.proto)}</td>` +
+        `<td class="num">${esc(c.events || 1)}</td>`;
       tb.appendChild(tr);
     }
     $("empty").hidden = rows.length > 0;
-    $("c-total").textContent = all.length;
-    $("c-talkers").textContent = new Set(all.map(c => c.image)).size;
-    $("c-domains").textContent = new Set(all.map(c => c.domain || c.remoteIP)).size;
+    $("c-total").textContent = rows.length;
+    $("c-talkers").textContent = new Set(rows.map(c => c.image)).size;
+    $("c-domains").textContent = new Set(rows.map(c => c.domain || c.remoteIP)).size;
   }
+
+  $("ipseg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    ipFilter = b.dataset.v;
+    for (const el of $("ipseg").children) el.classList.toggle("on", el === b);
+    render();
+  });
   async function refreshStatus() {
     try {
       const st = await (await fetch("/api/status")).json();

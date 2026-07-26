@@ -24,7 +24,21 @@ var debugCount atomic.Int64
 
 const debugMaxRecords = 60
 
+// noisyTasks are high-frequency bookkeeping events that carry no security
+// signal. They are skipped by the debug dump so a capture shows the records we
+// actually map.
+var noisyTasks = map[string]bool{
+	"ThreadWorkOnBehalfUpdate": true,
+	"CpuPriorityChange":        true,
+	"IoPriorityChange":         true,
+	"PagePriorityChange":       true,
+	"OperationEnd":             true,
+}
+
 func dumpRecord(e *etw.Event) {
+	if noisyTasks[e.System.Task.Name] {
+		return
+	}
 	if n := debugCount.Add(1); n > debugMaxRecords {
 		return
 	}
@@ -40,14 +54,28 @@ func dumpRecord(e *etw.Event) {
 	log.Printf("ETW_RAW %s", b)
 }
 
-// etwProviders are the userland ETW providers the flight recorder subscribes to.
-// No kernel driver is involved — these are all consumable from an elevated
+// etwProviders are the userland ETW providers the flight recorder subscribes
+// to. No kernel driver is involved — all are consumable from an elevated
 // userland session.
+//
+// Format is "name:level:eventIDs:matchAnyKeyword". Filtering here rather than
+// in normalize() matters: enabling these providers wide open buries the useful
+// records under a flood of ThreadWorkOnBehalfUpdate / CpuPriorityChange /
+// per-IRP file events (observed on a live Win11 box: ~99% noise).
+//
+// Kernel-File is deliberately NOT enabled in P1 — the flight recorder only
+// needs process + network + DNS, and Kernel-File is the highest-volume provider
+// on the system. It comes back in P2 for ransomware-pattern detection, scoped
+// to the events that actually matter.
 var etwProviders = []string{
-	"Microsoft-Windows-Kernel-Process", // process create/exit
-	"Microsoft-Windows-Kernel-Network", // TCP/UDP connects
-	"Microsoft-Windows-DNS-Client",     // name resolutions
-	"Microsoft-Windows-Kernel-File",    // file create/write/delete/rename
+	// Kernel-Process, event IDs 1 (ProcessStart) and 2 (ProcessStop) only.
+	"Microsoft-Windows-Kernel-Process:0xff:1,2:0x10",
+	// Kernel-Network: all events (connect/send/recv, v4 and v6). Volume is
+	// handled by flow de-duplication in the ledger rather than dropped here,
+	// so we keep visibility into every destination contacted.
+	"Microsoft-Windows-Kernel-Network",
+	// DNS-Client: query events carry QueryName/QueryResults.
+	"Microsoft-Windows-DNS-Client",
 }
 
 type etwSource struct {

@@ -5,6 +5,7 @@ package collector
 
 import (
 	"context"
+	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/graph"
@@ -26,7 +27,14 @@ type Options struct {
 	// saw start (i.e. everything already running when the agent launched).
 	// Injected so the collector stays platform-agnostic and testable.
 	ImageLookup func(pid uint32) string
+	// DedupWindow collapses repeated activity on the same flow into one ledger
+	// row. The kernel reports network activity per packet, so without this a
+	// single browser tab produces hundreds of identical rows. Zero disables it.
+	DedupWindow time.Duration
 }
+
+// DefaultDedupWindow is the flow-collapsing window used unless overridden.
+const DefaultDedupWindow = 5 * time.Minute
 
 type Collector struct {
 	src      source.EventSource
@@ -40,7 +48,7 @@ type Collector struct {
 
 // New builds a collector with default options (skip local traffic, resolve names).
 func New(src source.EventSource, led *ledger.DB) *Collector {
-	return NewWithOptions(src, led, Options{ResolveNames: true})
+	return NewWithOptions(src, led, Options{ResolveNames: true, DedupWindow: DefaultDedupWindow})
 }
 
 // NewWithOptions builds a collector over a source and ledger.
@@ -98,7 +106,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		image = c.lookupImage(e.PID)
 	}
 
-	_ = c.ledger.RecordConnection(ledger.Connection{
+	_ = c.ledger.RecordConnectionDedup(ledger.Connection{
 		Time:       e.Time,
 		PID:        e.PID,
 		Image:      image,
@@ -106,7 +114,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		RemotePort: e.RemotePort,
 		Proto:      e.Proto,
 		Domain:     domain,
-	})
+	}, c.opts.DedupWindow)
 }
 
 // lookupImage resolves and caches a PID's image path via the injected lookup.

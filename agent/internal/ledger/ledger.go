@@ -14,9 +14,13 @@ import (
 //go:embed schema.sql
 var schema string
 
-// Connection is one outbound-connection record.
+// Connection is one outbound-connection record. Because the kernel reports
+// network activity per packet, many raw events collapse into a single row:
+// Time is first contact, LastSeen is most recent, Events counts the rollup.
 type Connection struct {
 	Time       time.Time
+	LastSeen   time.Time
+	Events     int
 	PID        uint32
 	Image      string
 	RemoteIP   string
@@ -50,14 +54,52 @@ func (d *DB) Close() error { return d.sql.Close() }
 // RecordConnection inserts one connection row. An empty Verdict defaults to
 // "clean" via the schema.
 func (d *DB) RecordConnection(c Connection) error {
+	return d.RecordConnectionDedup(c, 0)
+}
+
+// RecordConnectionDedup records a connection, collapsing it into an existing
+// row when the same flow (pid, remote address/port, proto) was last seen within
+// window. This is what turns a per-packet event firehose into a readable
+// ledger. A zero window disables collapsing.
+func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	verdict := c.Verdict
 	if verdict == "" {
 		verdict = "clean"
 	}
+	ts := c.Time.UTC().Format(time.RFC3339Nano)
+
+	if window > 0 {
+		cutoff := c.Time.UTC().Add(-window).Format(time.RFC3339Nano)
+		var id int64
+		err := d.sql.QueryRow(
+			`SELECT id FROM connections
+			 WHERE pid = ? AND remote_ip = ? AND remote_port = ? AND proto = ?
+			   AND last_seen >= ?
+			 ORDER BY id DESC LIMIT 1`,
+			c.PID, c.RemoteIP, c.RemotePort, c.Proto, cutoff,
+		).Scan(&id)
+		if err == nil {
+			// Existing flow: bump activity, and fill in a name/image if this
+			// event knows one the original row lacked.
+			_, err = d.sql.Exec(
+				`UPDATE connections
+				 SET last_seen = ?, events = events + 1,
+				     domain = COALESCE(NULLIF(domain, ''), ?),
+				     image  = CASE WHEN image = '' THEN ? ELSE image END
+				 WHERE id = ?`,
+				ts, nullable(c.Domain), c.Image, id,
+			)
+			return err
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+	}
+
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, pid, image, remote_ip, remote_port, proto, domain, verdict)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.Time.UTC().Format(time.RFC3339Nano), c.PID, c.Image, c.RemoteIP,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict,
 	)
 	return err
@@ -66,8 +108,9 @@ func (d *DB) RecordConnection(c Connection) error {
 // RecentConnections returns up to limit connections, newest first.
 func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	rows, err := d.sql.Query(
-		`SELECT ts, pid, image, remote_ip, remote_port, proto, COALESCE(domain, ''), verdict
-		 FROM connections ORDER BY ts DESC, id DESC LIMIT ?`, limit,
+		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
+		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict
+		 FROM connections ORDER BY last_seen DESC, id DESC LIMIT ?`, limit,
 	)
 	if err != nil {
 		return nil, err
@@ -77,11 +120,13 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	var out []Connection
 	for rows.Next() {
 		var c Connection
-		var ts string
-		if err := rows.Scan(&ts, &c.PID, &c.Image, &c.RemoteIP, &c.RemotePort, &c.Proto, &c.Domain, &c.Verdict); err != nil {
+		var ts, last string
+		if err := rows.Scan(&ts, &last, &c.Events, &c.PID, &c.Image, &c.RemoteIP,
+			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict); err != nil {
 			return nil, err
 		}
 		c.Time, _ = time.Parse(time.RFC3339Nano, ts)
+		c.LastSeen, _ = time.Parse(time.RFC3339Nano, last)
 		out = append(out, c)
 	}
 	return out, rows.Err()

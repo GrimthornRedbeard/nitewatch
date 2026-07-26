@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -53,6 +54,8 @@ func (s *Server) Addr() string { return s.addr }
 
 type connectionDTO struct {
 	Time       time.Time `json:"time"`
+	LastSeen   time.Time `json:"lastSeen"`
+	Events     int       `json:"events"`
 	PID        uint32    `json:"pid"`
 	Image      string    `json:"image"`
 	RemoteIP   string    `json:"remoteIP"`
@@ -60,6 +63,7 @@ type connectionDTO struct {
 	Proto      string    `json:"proto"`
 	Domain     string    `json:"domain"`
 	Verdict    string    `json:"verdict"`
+	IPVersion  int       `json:"ipVersion"` // 4 or 6, for client-side filtering
 }
 
 type talkerDTO struct {
@@ -108,8 +112,10 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 	out := make([]connectionDTO, 0, len(rows))
 	for _, c := range rows {
 		out = append(out, connectionDTO{
-			Time: c.Time, PID: c.PID, Image: c.Image, RemoteIP: c.RemoteIP,
+			Time: c.Time, LastSeen: c.LastSeen, Events: c.Events,
+			PID: c.PID, Image: c.Image, RemoteIP: c.RemoteIP,
 			RemotePort: c.RemotePort, Proto: c.Proto, Domain: c.Domain, Verdict: c.Verdict,
+			IPVersion: ipVersion(c.RemoteIP),
 		})
 	}
 	writeJSON(w, out)
@@ -134,6 +140,19 @@ func (s *Server) handleTalkers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, talkerDTO{Image: img, Count: counts[img]})
 	}
 	writeJSON(w, out)
+}
+
+// ipVersion reports 4 or 6 for an address, or 0 if it isn't parseable.
+func ipVersion(s string) int {
+	ip := net.ParseIP(s)
+	switch {
+	case ip == nil:
+		return 0
+	case ip.To4() != nil:
+		return 4
+	default:
+		return 6
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
