@@ -1,0 +1,79 @@
+name: persistence
+# Persistence detection: software arranging to run automatically.
+#
+# The judgement this pack encodes: installing software and having it start with
+# Windows is completely normal, so the mechanism alone is never the story. What
+# matters is WHERE the program lives, WHETHER it is signed, and WHICH mechanism
+# it chose — some mechanisms exist almost exclusively for hiding.
+rules:
+  - id: persist-image-hijack
+    area: persistence
+    severity: critical
+    detector: autostart-hijack-mechanism
+    title: "Something set itself to launch whenever you run {{.HijackedProgram}}"
+    narrative: |
+      A setting was added that starts {{.Target}} every time you open
+      {{.HijackedProgram}}.
+
+      This is a Windows debugging feature. Ordinary software does not use it.
+      It is used almost exclusively to run something hidden whenever you launch
+      a program you trust.
+    playbook:
+      - "Treat this as serious unless you know exactly which developer tool set it."
+      - "Run a full Microsoft Defender scan now."
+      - "The setting is at: {{.Location}}"
+      - "If this is a work computer, tell your IT team."
+
+  - id: persist-autostart-replaced
+    area: persistence
+    severity: high
+    title: "An existing startup entry was changed to run something else"
+    detector: autostart-target-replaced
+    narrative: |
+      The startup entry "{{.EntryName}}" used to run:
+        {{.PreviousTarget}}
+      It now runs:
+        {{.Target}}
+
+      Programs normally register their own startup entry and leave it alone.
+      Quietly replacing what an existing entry runs is a way to inherit the
+      trust you already placed in something else.
+    playbook:
+      - "Did you just update or reinstall {{.EntryName}}? If so, this is probably fine."
+      - "If not, run a full Microsoft Defender scan."
+      - "The entry is at: {{.Location}}"
+
+  - id: persist-from-temp-location
+    area: persistence
+    severity: high
+    detector: autostart-from-temp-location
+    title: "A program in a temporary folder set itself to start with Windows"
+    narrative: |
+      {{.ProgramName}} arranged to {{.MechanismDescription}}, and it is stored in
+      {{.LocationKind}}:
+        {{.Target}}
+
+      Installed software lives in Program Files. Programs that run from
+      Downloads, Temp or AppData and also set themselves to start automatically
+      are behaving the way malware behaves after a bad download.
+    playbook:
+      - "Did you deliberately install this? If you do not recognise it, do not run it."
+      - "Run a full Microsoft Defender scan."
+      - "You can remove the startup entry from Task Manager → Startup apps."
+
+  - id: persist-unsigned-autostart
+    area: persistence
+    severity: medium
+    detector: autostart-unsigned
+    title: "{{.ProgramName}} set itself to start with Windows"
+    narrative: |
+      {{.ProgramName}} arranged to {{.MechanismDescription}}. Windows cannot
+      confirm who published it, because it is not digitally signed.
+
+      Plenty of small and homemade tools are unsigned, so this alone is not
+      proof of a problem — but it is worth knowing what starts with your PC.
+    playbook:
+      - "Do you recognise {{.ProgramName}} and expect it to start automatically?"
+      - "The program is at: {{.Target}}"
+      - "If you did not install it deliberately, run a full Microsoft Defender scan."
+      - "You can review everything that starts with Windows in Task Manager → Startup apps."

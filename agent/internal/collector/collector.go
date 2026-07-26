@@ -11,6 +11,7 @@ import (
 
 	gr "github.com/ShaneDolphin/gorapide"
 
+	"github.com/threattape/nitewatch/agent/internal/autostart"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/graph"
@@ -33,6 +34,9 @@ type Options struct {
 	// Recon supplies offline address ownership (AS owner / country). Optional:
 	// when nil, rows simply carry no ownership data.
 	Recon *recon.DB
+	// SignerLookup reports whether an executable is signed and by whom.
+	// Injected like ImageLookup so the collector stays platform-agnostic.
+	SignerLookup func(path string) (signed bool, signer string)
 	// ImageLookup resolves a PID to an image path for processes the graph never
 	// saw start (i.e. everything already running when the agent launched).
 	// Injected so the collector stays platform-agnostic and testable.
@@ -117,6 +121,9 @@ func (c *Collector) Run(ctx context.Context) error {
 		return err
 	}
 	go c.backfillNames(ctx)
+	if c.opts.Detect != nil {
+		go c.watchAutostart(ctx)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -302,6 +309,87 @@ func (c *Collector) backfillNames(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// watchAutostart polls the places software registers itself to run at startup
+// and alerts on what appears.
+//
+// The FIRST scan establishes a baseline and deliberately raises nothing. A new
+// install would otherwise greet the user with an alert for every program
+// already on their PC — the fastest possible way to teach someone that this
+// tool is noise. Only changes after that point are events.
+func (c *Collector) watchAutostart(ctx context.Context) {
+	baseline, err := autostart.Scan()
+	if err != nil {
+		return
+	}
+	log.Printf("autostart: baseline established (%d entries)", len(baseline.Entries))
+	prev := baseline
+
+	t := time.NewTicker(autostartInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			cur, err := autostart.Scan()
+			if err != nil {
+				continue
+			}
+			for _, ch := range autostart.Diff(prev, cur) {
+				c.reportAutostart(ch)
+			}
+			prev = cur
+		}
+	}
+}
+
+// autostartInterval balances catching a change promptly against reading the
+// registry constantly. Persistence is about surviving reboots, so a change is
+// still worth reporting a minute later.
+const autostartInterval = 30 * time.Second
+
+func (c *Collector) reportAutostart(ch autostart.Change) {
+	target := autostart.TargetPath(ch.Entry.Target)
+	subj := detect.PersistSubject{Change: ch}
+	if c.opts.SignerLookup != nil && target != "" {
+		subj.Signed, subj.Signer = c.opts.SignerLookup(target)
+	}
+
+	for _, d := range c.opts.Detect.EvaluatePersistence(subj) {
+		// Persistence alerts anchor to no connection, so they dedupe on the
+		// entry itself: re-detecting the same autostart must not re-alert.
+		created, err := c.ledger.RecordAlert(ledger.Alert{
+			Time:      time.Now(),
+			RuleID:    d.Rule.ID,
+			Area:      string(d.Rule.Area),
+			Severity:  string(d.Rule.Severity),
+			Title:     d.Rule.RenderTitle(d.Fields),
+			Narrative: d.Rule.RenderNarrative(d.Fields),
+			Playbook:  d.Rule.RenderPlaybook(d.Fields),
+			ConnID:    -autostartAnchor(ch),
+			Evidence:  d.Fields,
+		})
+		if err == nil && created {
+			log.Printf("ALERT [%s] %s", d.Rule.Severity, d.Rule.RenderTitle(d.Fields))
+		}
+	}
+}
+
+// autostartAnchor derives a stable negative pseudo-connection id from an entry,
+// so the (rule_id, conn_id) uniqueness index dedupes persistence alerts too.
+// Negative values cannot collide with real connection ids.
+func autostartAnchor(ch autostart.Change) int64 {
+	var h int64 = 1469598103934665603
+	for _, b := range []byte(ch.Entry.ID() + "|" + ch.Entry.Target) {
+		h ^= int64(b)
+		h *= 1099511628211
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h%1000000000 + 1
 }
 
 // peer determines which end of a network event is the remote party.

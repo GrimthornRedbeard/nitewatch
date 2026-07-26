@@ -88,7 +88,10 @@ func main() {
 	seed.ResolveNames = !*noResolve
 	seed.Recon = !*noRecon
 
-	opts := collector.Options{ImageLookup: platform.ProcessImage}
+	opts := collector.Options{
+		ImageLookup:  platform.ProcessImage,
+		SignerLookup: platform.FileSigner,
+	}
 	if eng := startDetection(*rulesDir, *noFeeds); eng != nil {
 		opts.Detect = eng
 	}
