@@ -102,9 +102,18 @@ func (d *DB) RecordConnection(c Connection) error {
 }
 
 // RecordConnectionDedup records a connection, collapsing it into an existing
-// row when the same flow (pid, remote address/port, proto) was last seen within
-// window. This is what turns a per-packet event firehose into a readable
-// ledger. A zero window disables collapsing.
+// row when the same flow was last seen within window. This is what turns a
+// per-packet event firehose into a readable ledger. A zero window disables it.
+//
+// The flow is keyed on the PROGRAM, not the process instance. Keying on PID
+// looked right and was wrong in practice: Chromium-based applications — Claude,
+// Discord, Chrome, Brave, Slack, VS Code — run a main process plus a renderer
+// per tab plus GPU and utility processes, ALL with the same image name. One app
+// talking to one endpoint produced a separate identical-looking row per
+// process, which reads exactly like the de-duplication being broken.
+//
+// Connections we could not attribute fall back to keying on PID, so that
+// unrelated unattributed traffic does not all collapse into a single row.
 func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	verdict := c.Verdict
 	if verdict == "" {
@@ -115,19 +124,31 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	if window > 0 {
 		cutoff := formatTS(c.Time.Add(-window))
 		var id int64
-		err := d.sql.QueryRow(
-			`SELECT id FROM connections
-			 WHERE pid = ? AND remote_ip = ? AND remote_port = ? AND proto = ?
-			   AND last_seen >= ?
-			 ORDER BY id DESC LIMIT 1`,
-			c.PID, c.RemoteIP, c.RemotePort, c.Proto, cutoff,
-		).Scan(&id)
+		var err error
+		if c.Image != "" {
+			err = d.sql.QueryRow(
+				`SELECT id FROM connections
+				 WHERE image = ? AND remote_ip = ? AND remote_port = ? AND proto = ?
+				   AND last_seen >= ?
+				 ORDER BY id DESC LIMIT 1`,
+				c.Image, c.RemoteIP, c.RemotePort, c.Proto, cutoff,
+			).Scan(&id)
+		} else {
+			err = d.sql.QueryRow(
+				`SELECT id FROM connections
+				 WHERE image = '' AND pid = ? AND remote_ip = ? AND remote_port = ? AND proto = ?
+				   AND last_seen >= ?
+				 ORDER BY id DESC LIMIT 1`,
+				c.PID, c.RemoteIP, c.RemotePort, c.Proto, cutoff,
+			).Scan(&id)
+		}
 		if err == nil {
 			// Existing flow: bump activity, and fill in a name/image if this
 			// event knows one the original row lacked.
 			_, err = d.sql.Exec(
 				`UPDATE connections
 				 SET last_seen = ?, events = events + 1,
+				     pid = ?,
 				     domain = COALESCE(NULLIF(domain, ''), ?),
 				     image  = CASE WHEN image = '' THEN ? ELSE image END,
 				     inbound = CASE WHEN ? = 0 THEN 0 ELSE inbound END,
@@ -136,7 +157,7 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 				     country = COALESCE(NULLIF(country, ''), ?),
 				     story   = COALESCE(NULLIF(story, ''), ?)
 				 WHERE id = ?`,
-				ts, nullable(c.Domain), c.Image, c.Inbound,
+				ts, c.PID, nullable(c.Domain), c.Image, c.Inbound,
 				c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story), id,
 			)
 			return err

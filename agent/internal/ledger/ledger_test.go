@@ -251,3 +251,92 @@ func TestPruneKeepsUnacknowledgedAlerts(t *testing.T) {
 		t.Fatalf("the unacknowledged alert must survive; got %+v", after)
 	}
 }
+
+// Reported from a live machine: claude.exe appeared as five separate rows to
+// api.anthropic.com and the de-duplication looked broken.
+//
+// It was keying on PID. Chromium-based apps — Claude, Discord, Chrome, Brave,
+// Slack, VS Code — run a main process plus a renderer per tab plus GPU and
+// utility processes, ALL with the same image name. One app talking to one
+// endpoint produced one row PER PROCESS.
+func TestElectronAppWithManyPIDsCollapsesToOneRow(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "electron.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	base := time.Date(2026, 7, 26, 18, 4, 0, 0, time.UTC)
+	const image = `C:\Users\k\AppData\Local\Claude\claude.exe`
+
+	// Five renderer/utility processes, same program, same endpoint.
+	for i, pid := range []uint32{1200, 3044, 5188, 7712, 9004} {
+		if err := db.RecordConnectionDedup(Connection{
+			Time: base.Add(time.Duration(i) * 3 * time.Second),
+			PID:  pid, Image: image,
+			RemoteIP: "2607:6bc0::10", RemotePort: 443, Proto: "TCP",
+			Domain: "api.anthropic.com",
+		}, 5*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.RecentConnections(20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("one program to one endpoint should be ONE row, got %d", len(rows))
+	}
+	if rows[0].Events != 5 {
+		t.Errorf("activity should count all five processes, got %d", rows[0].Events)
+	}
+	// The row must carry a current PID so "stop this program" has a live target.
+	if rows[0].PID != 9004 {
+		t.Errorf("row should hold the most recent PID, got %d", rows[0].PID)
+	}
+}
+
+// Collapsing by program must not merge things a user would consider distinct.
+func TestDedupStillSeparatesGenuinelyDifferentFlows(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "distinct.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 26, 18, 0, 0, 0, time.UTC)
+	rec := func(image, ip string, port uint16, proto string) {
+		_ = db.RecordConnectionDedup(Connection{
+			Time: now, PID: 100, Image: image, RemoteIP: ip, RemotePort: port, Proto: proto,
+		}, 5*time.Minute)
+	}
+	rec(`C:\a\claude.exe`, "2607:6bc0::10", 443, "TCP")
+	rec(`C:\a\claude.exe`, "2607:6bc0::10", 443, "UDP")  // QUIC vs TCP
+	rec(`C:\a\claude.exe`, "160.79.104.10", 443, "TCP")  // IPv4 vs IPv6 endpoint
+	rec(`C:\a\claude.exe`, "2607:6bc0::10", 8443, "TCP") // different port
+	rec(`C:\b\other.exe`, "2607:6bc0::10", 443, "TCP")   // different program
+
+	rows, _ := db.RecentConnections(20)
+	if len(rows) != 5 {
+		t.Fatalf("genuinely different flows must stay separate, got %d rows", len(rows))
+	}
+}
+
+// Unattributed connections must not all collapse into one meaningless row.
+func TestUnattributedConnectionsStillKeyOnPID(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "noimage.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	_ = db.RecordConnectionDedup(Connection{Time: now, PID: 111, RemoteIP: "1.1.1.1", RemotePort: 443, Proto: "TCP"}, time.Minute)
+	_ = db.RecordConnectionDedup(Connection{Time: now, PID: 222, RemoteIP: "1.1.1.1", RemotePort: 443, Proto: "TCP"}, time.Minute)
+
+	rows, _ := db.RecentConnections(10)
+	if len(rows) != 2 {
+		t.Fatalf("unattributed traffic from different processes must not merge, got %d", len(rows))
+	}
+}
