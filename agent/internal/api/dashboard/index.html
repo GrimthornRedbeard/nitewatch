@@ -42,7 +42,12 @@
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .5px; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { color: var(--fg); }
+  th .arrow { opacity: .45; font-size: 10px; margin-left: 4px; }
+  th.sorted { color: var(--accent); }
+  th.sorted .arrow { opacity: 1; }
   tr:last-child td { border-bottom: none; }
   td.domain { color: var(--accent); }
   td.raw { color: var(--muted); font-style: italic; }
@@ -174,12 +179,16 @@
     </select>
   </div>
   <table>
-    <thead><tr>
-      <th>Last seen</th><th>Process</th><th>Destination</th><th>IP:Port</th>
-      <th title="Who owns the address block (autonomous system)">Owner</th>
-      <th title="Country the address block is registered to">Country</th>
-      <th>Proto</th><th title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
-      <th title="Network events collapsed into this connection">Activity</th>
+    <thead><tr id="thead">
+      <th data-k="lastSeen">Last seen</th>
+      <th data-k="image">Process</th>
+      <th data-k="domain">Destination</th>
+      <th data-k="remoteIP">IP:Port</th>
+      <th data-k="asOrg" title="Who owns the address block (autonomous system)">Owner</th>
+      <th data-k="country" title="Country the address block is registered to">Country</th>
+      <th data-k="proto">Proto</th>
+      <th data-k="inbound" title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
+      <th data-k="events" title="Network events collapsed into this connection">Activity</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -232,27 +241,71 @@
   let ipFilter = "all";
   let ccFilter = "all";
 
-  // Cloud/CDN networks host everyone's traffic, so "the owner isn't the app's
-  // own company" is normal there and says nothing. Outside them, a program
-  // talking to a network unrelated to its vendor is worth a second look.
-  const SHARED_HOSTING = /CLOUDFLARE|AMAZON|AWS|GOOGLE|AKAMAI|FASTLY|MICROSOFT|AZURE|DIGITALOCEAN|LINODE|HETZNER|OVH|CLOUDFRONT/i;
+  // A "third-party" badge used to live here: it flagged a row when the address
+  // owner did not look related to the program name. Live data killed it —
+  // steam.exe -> VALVE-CORPORATION and claude.exe -> ANTHROPIC are a program
+  // talking to its own vendor, and the badge called both suspicious. A
+  // heuristic that cannot recognise the most legitimate case there is does not
+  // belong in front of users.
 
-  // Very rough: does the owner or hostname look related to the program name?
-  function looksRelated(c) {
-    const proc = (shortImage(c.image) || "").replace(/\.exe$/i, "").toLowerCase();
-    if (proc.length < 4) return true; // too short to match on meaningfully
-    const hay = ((c.asOrg || "") + " " + (c.domain || "")).toLowerCase();
-    return hay.includes(proc);
+  // --- sorting ---
+  // Default is most-recent-first, which is what someone glancing at the page
+  // wants; any other column is something they went looking for.
+  let sortKey = "lastSeen", sortDesc = true;
+
+  // Addresses must sort numerically per octet, not as text, or 10.0.0.2 lands
+  // between 10.0.0.19 and 10.0.0.3.
+  function ipSortKey(ip) {
+    if (!ip) return "";
+    if (ip.includes(":")) return "6|" + ip.split(":").map(h => (h || "0").padStart(4, "0")).join(":");
+    return "4|" + ip.split(".").map(o => o.padStart(3, "0")).join(".");
   }
 
-  // Flags a row when the address block owner is neither shared hosting nor
-  // plausibly the program's own vendor. This is a HINT, not a verdict.
-  function mismatchFlag(c) {
-    if (!c.asOrg) return "";
-    if (SHARED_HOSTING.test(c.asOrg)) return "";
-    if (looksRelated(c)) return "";
-    return ` <span class="flag" title="${esc(shortImage(c.image))} is talking to a network owned by ${esc(c.asOrg)}, which is not shared cloud hosting and does not look related to the program. Worth a look — not necessarily bad.">3rd-party</span>`;
+  function sortValue(c, k) {
+    switch (k) {
+      case "lastSeen": return new Date(c.lastSeen || c.time).getTime() || 0;
+      case "events":   return c.events || 0;
+      case "inbound":  return c.inbound ? 1 : 0;
+      case "image":    return (shortImage(c.image) || "").toLowerCase();
+      case "remoteIP": return ipSortKey(c.remoteIP);
+      // Unnamed destinations sort last rather than first: a blank is the
+      // absence of an answer, not an answer that sorts before "a".
+      case "domain":   return (c.domain || "\uffff").toLowerCase();
+      default:         return String(c[k] ?? "\uffff").toLowerCase();
+    }
   }
+
+  function applySort(rows) {
+    return rows.sort((a, b) => {
+      const x = sortValue(a, sortKey), y = sortValue(b, sortKey);
+      if (x < y) return sortDesc ? 1 : -1;
+      if (x > y) return sortDesc ? -1 : 1;
+      return 0;
+    });
+  }
+
+  function paintHeaders() {
+    for (const th of $("thead").children) {
+      const on = th.dataset.k === sortKey;
+      th.classList.toggle("sorted", on);
+      const label = th.textContent.replace(/[\u25b2\u25bc]\s*$/, "").trim();
+      th.innerHTML = esc(label) + (on ? `<span class="arrow">${sortDesc ? "\u25bc" : "\u25b2"}</span>` : "");
+    }
+  }
+
+  $("thead").addEventListener("click", (e) => {
+    const th = e.target.closest("th");
+    if (!th || !th.dataset.k) return;
+    if (sortKey === th.dataset.k) {
+      sortDesc = !sortDesc;
+    } else {
+      sortKey = th.dataset.k;
+      // Times and counts are most useful largest-first; text A-Z.
+      sortDesc = (sortKey === "lastSeen" || sortKey === "events");
+    }
+    paintHeaders();
+    render();
+  });
 
   function visible() {
     const q = $("filter").value.toLowerCase();
@@ -268,7 +321,7 @@
 
   function render() {
     syncCountryOptions();
-    const rows = visible();
+    const rows = applySort(visible());
     const tb = $("rows");
     tb.innerHTML = "";
     for (const c of rows) {
@@ -287,7 +340,7 @@
         dest +
         `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
         `<td class="owner" title="${c.asn ? "AS" + c.asn : "unknown owner"}">${esc(c.asOrg || "—")}</td>` +
-        `<td class="cc">${esc(c.country || "—")}${mismatchFlag(c)}</td>` +
+        `<td class="cc">${esc(c.country || "—")}</td>` +
         `<td>${esc(c.proto)}</td>` +
         `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
         `<td class="num">${esc(c.events || 1)}</td>`;
@@ -510,6 +563,7 @@
     refreshStatus();
   }
   $("filter").addEventListener("input", render);
+  paintHeaders();
   refresh();
   setInterval(refresh, 5000);
 </script>

@@ -96,7 +96,9 @@ func TestTorExitAloneDoesNotAlert(t *testing.T) {
 func TestRawIPWithoutDNSFires(t *testing.T) {
 	e := New(loadShippedPack(t), nil)
 	subj := Subject{
-		Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		// Unsigned: signed software dialling a bare address is how the modern
+		// web works, and the rule no longer fires on it.
+		Event: event.NormalizedEvent{Kind: event.KindNetConnect},
 		Conn:  ledger.Connection{Image: `C:\App\thing.exe`, RemoteIP: "203.0.113.9", RemotePort: 443},
 		// Ownership data is required for this rule to be judgeable at all.
 		Recon:  recon.Info{ASN: 64500, Org: "SOME-SMALL-HOSTING-LLC"},
@@ -216,7 +218,7 @@ func TestRawIPRuleIgnoresSharedInfrastructure(t *testing.T) {
 	e := New(loadShippedPack(t), nil)
 
 	cdn := Subject{
-		Event:  event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		Event:  event.NormalizedEvent{Kind: event.KindNetConnect},
 		Conn:   ledger.Connection{Image: `C:\App\app.exe`, RemoteIP: "151.101.54.49", RemotePort: 443},
 		Recon:  recon.Info{ASN: 54113, Org: "FASTLY", Country: "US"},
 		HadDNS: false, FirstContact: true,
@@ -261,12 +263,62 @@ func TestSharedInfrastructureRecognition(t *testing.T) {
 func TestRawIPRuleStaysQuietWithoutOwnershipData(t *testing.T) {
 	e := New(loadShippedPack(t), nil)
 	noRecon := Subject{
-		Event:  event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		Event:  event.NormalizedEvent{Kind: event.KindNetConnect},
 		Conn:   ledger.Connection{Image: `C:\App\app.exe`, RemoteIP: "151.101.54.49", RemotePort: 443},
 		HadDNS: false, FirstContact: true,
 		// Recon deliberately zero: dataset not loaded yet.
 	}
 	if d := find(e.Evaluate(noRecon), "c2-raw-ip-no-dns"); d != nil {
 		t.Fatal("without ownership data the signal cannot be judged and must not alert")
+	}
+}
+
+// Regression from a live desktop: five HIGH alerts in one minute, all for
+// signed mainstream software talking to its own vendor. The rule's premise —
+// that a missing DNS lookup is suspicious — stopped holding once
+// DNS-over-HTTPS became the browser default.
+func TestRealWorldSignedVendorTrafficIsSilent(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+
+	// Verbatim from the report.
+	cases := []struct {
+		image, ip, org string
+	}{
+		{`C:\Program Files\Steam\steam.exe`, "162.254.199.165", "VALVE-CORPORATION"},
+		{`C:\Program Files\Battle.net\Agent.exe`, "137.221.105.232", "BLIZZARD"},
+		{`C:\Program Files\Google\Chrome\chrome.exe`, "160.79.104.10", "ANTHROPIC"},
+		{`C:\Users\k\AppData\Local\Claude\claude.exe`, "2607:6bc0::10", "ANTHROPIC"},
+		{`C:\Program Files\BraveSoftware\brave.exe`, "2620:10b:7001:11::128", "CONVIVA-AS"},
+	}
+	for _, c := range cases {
+		subj := Subject{
+			Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true, Signer: "Vendor"},
+			Conn:  ledger.Connection{Image: c.image, RemoteIP: c.ip, RemotePort: 443},
+			Recon: recon.Info{Org: c.org, Country: "US"},
+			// Exactly the observed conditions: no lookup seen (DoH), first contact.
+			HadDNS: false, FirstContact: true,
+		}
+		if d := find(e.Evaluate(subj), "c2-raw-ip-no-dns"); d != nil {
+			t.Errorf("%s -> %s (%s): signed vendor traffic must not alert",
+				c.image, c.ip, c.org)
+		}
+	}
+}
+
+// The case the rule still exists for: no publisher, unremarkable network.
+func TestUnsignedBinaryDiallingBareAddressStillFires(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	subj := Subject{
+		Event:  event.NormalizedEvent{Kind: event.KindNetConnect}, // unsigned
+		Conn:   ledger.Connection{Image: `C:\Users\k\Downloads\invoice.exe`, RemoteIP: "203.0.113.9", RemotePort: 443},
+		Recon:  recon.Info{Org: "SOME-SMALL-HOSTING-LLC", Country: "RU"},
+		HadDNS: false, FirstContact: true,
+	}
+	d := find(e.Evaluate(subj), "c2-raw-ip-no-dns")
+	if d == nil {
+		t.Fatal("an unsigned binary dialling a bare address should still be surfaced")
+	}
+	if d.Rule.Severity != rules.Medium {
+		t.Errorf("severity = %s, want medium — this is a prompt, not a finding", d.Rule.Severity)
 	}
 }

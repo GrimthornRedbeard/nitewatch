@@ -27,17 +27,19 @@ rules:
 
   - id: c2-raw-ip-no-dns
     area: c2
-    severity: high
+    # Medium, not high. Even with the unsigned requirement this is a prompt to
+    # look, not a finding — and high severity interrupts, which this does not
+    # deserve.
+    severity: medium
     detector: raw-ip-no-dns
     title: "{{.ProcessName}} connected to a numeric address without looking it up"
     narrative: |
       {{.ProcessName}} connected straight to {{.RemoteIP}}{{if .Owner}}, a network
-      operated by {{.Owner}},{{end}} without any name lookup being seen first.
+      operated by {{.Owner}},{{end}} with no name lookup seen first — and Windows
+      cannot confirm who published this program.
 
-      Some malware uses hard-coded addresses to avoid leaving a trace. But there
-      are ordinary explanations too — the program may have looked the name up
-      minutes ago, or used encrypted DNS, which this tool cannot see. Treat this
-      as a prompt to check what {{.ProcessName}} is, not as a finding against it.
+      Either part alone would be unremarkable. Together they are worth a look:
+      software with no publisher, reaching an address it never asked for by name.
     playbook:
       - "Do you recognise {{.ProcessName}}? If not, look it up before doing anything else."
       - "Check who owns the address it contacted: {{.RemoteIP}}{{if .Owner}} (currently registered to {{.Owner}}){{end}}."

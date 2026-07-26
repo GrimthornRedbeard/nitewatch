@@ -136,46 +136,47 @@ func detectIntelHit(s Subject, e *Engine) map[string]any {
 	return nil
 }
 
-// detectRawIPNoDNS fires when a program dials a bare address it never looked up.
-// Malware often carries hardcoded addresses precisely to avoid leaving DNS
-// evidence.
+// detectRawIPNoDNS fires when an UNSIGNED program dials a bare address with no
+// observed lookup.
 //
-// The hard part is that "no lookup was observed" is NOT the same as "no lookup
-// happened", and the gap is large enough to sink the rule if ignored:
+// The unsigned requirement is not a refinement — it is what makes this rule
+// viable at all. Live data from a normal desktop fired it on Steam contacting
+// Valve, Blizzard's agent contacting Blizzard, Chrome and Claude contacting
+// Anthropic, and Brave contacting a video-analytics host. Every one signed by
+// its own vendor, every one legitimate. Five high-severity alerts in a minute
+// for a machine doing nothing wrong.
 //
-//   - DNS-over-HTTPS. Firefox, Chrome, Edge and Windows itself increasingly
-//     resolve over HTTPS, which produces no DNS-Client telemetry at all. Every
-//     connection a DoH browser makes looks like a bare-address contact.
-//   - Cached and configured addresses. A program that resolved a name an hour
-//     ago, or reads an address from config, legitimately connects with no
-//     lookup nearby.
-//   - CDN and cloud infrastructure. Content is served from pools of addresses
-//     that clients reach directly and constantly.
+// The cause is that "no lookup observed" stopped being a signal:
 //
-// So a bare-address contact to SHARED INFRASTRUCTURE is not evidence of
-// anything — it is the normal shape of the modern web. The rule therefore fires
-// only for destinations on networks that are not shared hosting. Traffic to
-// genuinely malicious infrastructure is caught by the feed rule regardless of
-// how the address was obtained.
+//   - DNS-over-HTTPS is the DEFAULT in Brave and Chrome and is spreading to the
+//     OS. Those lookups are HTTPS to a resolver and produce no DNS telemetry
+//     whatsoever, so every browser connection looks like a bare-address dial.
+//   - Long-lived clients resolve once at launch and connect for hours after.
+//   - Addresses arrive in config, in service discovery, and from previous runs.
+//
+// What remains genuinely odd is an unsigned binary — no publisher, nobody
+// accountable — reaching a bare address on a network that is not shared
+// hosting, for the first time. That combination is rare on a normal machine.
+// Signed software doing it is simply how the modern web works, and saying
+// otherwise trains people to dismiss the alerts that matter.
 func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
 	if s.HadDNS || s.Conn.Inbound || !s.FirstContact {
 		return nil
 	}
-	// A name from any source (including reverse DNS) means the destination is
-	// identifiable, which is the opposite of hiding.
+	// A name from any source means the destination is identifiable, which is
+	// the opposite of hiding.
 	if s.Domain != "" {
 		return nil
 	}
-	// Ownership data is what makes this signal judgeable, and it loads in the
-	// background over a 45MB download. Firing while it is unavailable would
-	// mean every restart produces the CDN false positives this rule is
-	// explicitly meant to avoid. A weak signal we cannot contextualise is not
-	// worth interrupting someone over — better to miss it than to cry wolf on
-	// every boot.
-	if s.Recon.Org == "" {
+	// Signed software is accountable to a publisher; that alone removes this
+	// weak signal's entire basis.
+	if s.Event.Signed {
 		return nil
 	}
-	if SharedInfrastructure(s.Recon.Org) {
+	// Ownership data is what makes the rest judgeable, and it loads in the
+	// background. Firing without it would reproduce the false positives on
+	// every restart.
+	if s.Recon.Org == "" || SharedInfrastructure(s.Recon.Org) {
 		return nil
 	}
 	return map[string]any{}
