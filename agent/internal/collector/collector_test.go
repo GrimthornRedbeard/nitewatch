@@ -51,6 +51,44 @@ func TestCollectorSkipsLocalTrafficAndAttributesViaLookup(t *testing.T) {
 	}
 }
 
+// Regression: main.go builds Options{} without DedupWindow, which left it zero
+// and silently disabled flow collapsing on the real agent — the ledger filled
+// with hundreds of Activity=1 rows for one conversation. Options defaults must
+// be applied in NewWithOptions, the constructor every caller actually uses.
+func TestOptionsWithoutDedupWindowStillCollapsesFlows(t *testing.T) {
+	led, err := ledger.Open(filepath.Join(t.TempDir(), "defaults.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer led.Close()
+
+	src, err := source.NewReplaySource("../../testdata/traces/flood.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly how cmd/nitewatch constructs it: no DedupWindow set.
+	c := NewWithOptions(src, led, Options{ResolveNames: false})
+	c.localNets = localNetsForTest(t, "192.168.1.0/24") // pin: don't depend on the dev host
+	if err := c.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := led.RecentConnections(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("one conversation should be one row, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].Events != 6 {
+		t.Fatalf("want activity count 6, got %d", rows[0].Events)
+	}
+	if rows[0].Inbound {
+		t.Fatalf("a flow with outbound packets must be framed outbound: %+v", rows[0])
+	}
+}
+
 func TestCollectorPopulatesLedgerFromReplay(t *testing.T) {
 	led, err := ledger.Open(filepath.Join(t.TempDir(), "c.db"))
 	if err != nil {

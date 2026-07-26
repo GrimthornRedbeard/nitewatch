@@ -14,6 +14,22 @@ import (
 //go:embed schema.sql
 var schema string
 
+// tsFormat is fixed-width so timestamps compare correctly as strings in SQL.
+// RFC3339Nano cannot be used for storage: it strips trailing zeros, so
+// "…:29Z" (whole second) sorts ABOVE "…:29.5Z", breaking range comparisons
+// like the dedup window's `last_seen >= cutoff`.
+const tsFormat = "2006-01-02T15:04:05.000000000Z"
+
+func formatTS(t time.Time) string { return t.UTC().Format(tsFormat) }
+
+func parseTS(s string) time.Time {
+	if t, err := time.Parse(tsFormat, s); err == nil {
+		return t
+	}
+	t, _ := time.Parse(time.RFC3339Nano, s) // rows written by older builds
+	return t
+}
+
 // Connection is one outbound-connection record. Because the kernel reports
 // network activity per packet, many raw events collapse into a single row:
 // Time is first contact, LastSeen is most recent, Events counts the rollup.
@@ -67,10 +83,10 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	if verdict == "" {
 		verdict = "clean"
 	}
-	ts := c.Time.UTC().Format(time.RFC3339Nano)
+	ts := formatTS(c.Time)
 
 	if window > 0 {
-		cutoff := c.Time.UTC().Add(-window).Format(time.RFC3339Nano)
+		cutoff := formatTS(c.Time.Add(-window))
 		var id int64
 		err := d.sql.QueryRow(
 			`SELECT id FROM connections
@@ -86,9 +102,10 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 				`UPDATE connections
 				 SET last_seen = ?, events = events + 1,
 				     domain = COALESCE(NULLIF(domain, ''), ?),
-				     image  = CASE WHEN image = '' THEN ? ELSE image END
+				     image  = CASE WHEN image = '' THEN ? ELSE image END,
+				     inbound = CASE WHEN ? = 0 THEN 0 ELSE inbound END
 				 WHERE id = ?`,
-				ts, nullable(c.Domain), c.Image, id,
+				ts, nullable(c.Domain), c.Image, c.Inbound, id,
 			)
 			return err
 		}
@@ -126,8 +143,8 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound); err != nil {
 			return nil, err
 		}
-		c.Time, _ = time.Parse(time.RFC3339Nano, ts)
-		c.LastSeen, _ = time.Parse(time.RFC3339Nano, last)
+		c.Time = parseTS(ts)
+		c.LastSeen = parseTS(last)
 		out = append(out, c)
 	}
 	return out, rows.Err()

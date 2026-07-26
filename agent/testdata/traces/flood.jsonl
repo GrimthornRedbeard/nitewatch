@@ -1,0 +1,6 @@
+{"seq":1,"kind":"NetConnect","time":"2026-07-26T04:14:29.000000000Z","pid":26384,"srcIP":"192.168.1.66","srcPort":55450,"remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}
+{"seq":2,"kind":"NetConnect","time":"2026-07-26T04:14:29.100000000Z","pid":26384,"srcIP":"93.184.216.34","srcPort":443,"remoteIP":"192.168.1.66","remotePort":55450,"proto":"TCP"}
+{"seq":3,"kind":"NetConnect","time":"2026-07-26T04:14:29.500000000Z","pid":26384,"srcIP":"192.168.1.66","srcPort":55450,"remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}
+{"seq":4,"kind":"NetConnect","time":"2026-07-26T04:14:30.000000000Z","pid":26384,"srcIP":"93.184.216.34","srcPort":443,"remoteIP":"192.168.1.66","remotePort":55450,"proto":"TCP"}
+{"seq":5,"kind":"NetConnect","time":"2026-07-26T04:14:31.250000000Z","pid":26384,"srcIP":"192.168.1.66","srcPort":55450,"remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}
+{"seq":6,"kind":"NetConnect","time":"2026-07-26T04:14:32.000000000Z","pid":26384,"srcIP":"192.168.1.66","srcPort":55450,"remoteIP":"93.184.216.34","remotePort":443,"proto":"TCP"}

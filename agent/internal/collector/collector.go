@@ -36,6 +36,9 @@ type Options struct {
 // DefaultDedupWindow is the flow-collapsing window used unless overridden.
 const DefaultDedupWindow = 5 * time.Minute
 
+// DedupDisabled turns off flow collapsing (every event gets its own row).
+const DedupDisabled = -1 * time.Nanosecond
+
 type Collector struct {
 	src       source.EventSource
 	window    *graph.Window
@@ -49,11 +52,18 @@ type Collector struct {
 
 // New builds a collector with default options (skip local traffic, resolve names).
 func New(src source.EventSource, led *ledger.DB) *Collector {
-	return NewWithOptions(src, led, Options{ResolveNames: true, DedupWindow: DefaultDedupWindow})
+	return NewWithOptions(src, led, Options{ResolveNames: true})
 }
 
-// NewWithOptions builds a collector over a source and ledger.
+// NewWithOptions builds a collector over a source and ledger. Defaults are
+// applied here rather than in New so every caller gets them — a zero
+// DedupWindow means "unset", not "disabled" (use DedupDisabled for that).
 func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Collector {
+	if opts.DedupWindow == 0 {
+		opts.DedupWindow = DefaultDedupWindow
+	} else if opts.DedupWindow == DedupDisabled {
+		opts.DedupWindow = 0
+	}
 	return &Collector{
 		src:        src,
 		window:     graph.NewWindow(graph.WindowConfig{}),
