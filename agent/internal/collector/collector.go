@@ -346,9 +346,14 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 		FirstContact: c.firstContact,
 	}
 	c.suppress.Observe(conn.Image, e.Time)
+	connCtx := c.window.Current().ContextFor(e.PID)
 	for _, d := range c.opts.Detect.Evaluate(subject) {
 		if v := c.suppress.Check(d, subject, e.Time); v.Suppressed {
 			continue
+		}
+		if len(connCtx.Lineage) > 0 {
+			d.Fields["Context"] = connCtx
+			d.Fields["ContextSummary"] = connCtx.Summary()
 		}
 		created, err := c.ledger.RecordAlert(ledger.Alert{
 			Time:      e.Time,
@@ -529,6 +534,11 @@ func shortBase(p string) string {
 // reportFile persists and notifies file-activity detections.
 func (c *Collector) reportFile(subj detect.FileSubject, at time.Time) {
 	c.suppress.Observe(subj.Image, at)
+	// The causal context is the difference between "a program wrote 100 files"
+	// and "the program you opened from the desktop read 100 photos in your
+	// Pictures folder after you visited an upload page". Without it a file
+	// alert is a number with no explanation.
+	ctx := c.window.Current().ContextFor(subj.PID)
 	for _, d := range c.opts.Detect.EvaluateFile(subj) {
 		// File alerts go through the same gates as connection alerts, or
 		// "always allow" silently does nothing for them.
@@ -542,6 +552,11 @@ func (c *Collector) reportFile(subj detect.FileSubject, at time.Time) {
 		// File alerts anchor on the process rather than a connection, so one
 		// encryption sweep produces one alert instead of one per file.
 		anchor := -int64(subj.PID) - 1
+		fields := d.Fields
+		if len(ctx.Lineage) > 0 {
+			fields["Context"] = ctx
+			fields["ContextSummary"] = ctx.Summary()
+		}
 		created, err := c.ledger.RecordAlert(ledger.Alert{
 			Time: at, RuleID: d.Rule.ID, Area: string(d.Rule.Area),
 			Severity:  string(d.Rule.Severity),
@@ -549,7 +564,7 @@ func (c *Collector) reportFile(subj detect.FileSubject, at time.Time) {
 			Narrative: d.Rule.RenderNarrative(d.Fields),
 			Playbook:  d.Rule.RenderPlaybook(d.Fields),
 			ConnID:    anchor,
-			Evidence:  d.Fields,
+			Evidence:  fields,
 		})
 		if err == nil && created {
 			title := d.Rule.RenderTitle(d.Fields)

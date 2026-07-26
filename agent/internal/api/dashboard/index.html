@@ -113,6 +113,14 @@
   .alert .fix { border-color: #3d5a80; background: #16283d; color: #cfe4ff; }
   .alert .fix:hover { border-color: var(--accent); }
   .alert .fix.hard { border-color: #6a2a2a; background: #2a1414; color: #ffb3b3; }
+  .cause { margin: 10px 0 0; padding: 10px 12px; background: #0e1420;
+    border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+  .cause h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--muted); font-weight: 600; }
+  .cause .lin { color: var(--accent); font-family: ui-monospace, monospace; font-size: 12px; }
+  .cause ul { margin: 8px 0 0; padding-left: 18px; color: #cfd6e4; }
+  .cause .cnt { color: var(--muted); }
+  .cause .note { color: var(--muted); margin-top: 8px; font-size: 11px; }
   .actmsg { font-size: 12px; margin-top: 8px; color: #7ddc9a; }
   .actmsg.bad { color: #ff9f9f; }
   .alert.acked { opacity: .55; }
@@ -475,12 +483,38 @@
     return (!isNaN(d) && (Date.now() - d.getTime()) > 3600e3) ? " stale" : "";
   }
 
+  // Renders the causal context: what started this program, and what else it was
+  // doing. This is the "why did that happen?" that a flat log cannot answer.
+  function causeHTML(ev) {
+    const c = ev && ev.Context;
+    if (!c || !(c.lineage || []).length) return "";
+    const acts = (c.recent || []).map(a =>
+      `<li>${esc(activityLabel(a.kind))}${a.detail ? " " + esc(a.detail) : ""}` +
+      (a.count > 1 ? ` <span class="cnt">×${a.count}</span>` : "") + `</li>`).join("");
+    return `<div class="cause">
+      <h4>What led to this</h4>
+      <div class="lin">${c.lineage.map(esc).join(" → ")}</div>
+      ${c.launchedBy ? `<div class="note">${c.userLaunched
+        ? "Started from " + esc(c.launchedBy) + ", which usually means you opened it."
+        : "Started by " + esc(c.launchedBy) + " — not launched from the desktop."}</div>` : ""}
+      ${acts ? `<ul>${acts}</ul>` : ""}
+      <div class="note">NiteWatch cannot see mouse or keyboard input, so it cannot
+        tell whether you clicked something. This is what the programs did.</div>
+    </div>`;
+  }
+  function activityLabel(kind) {
+    return ({ DNSQuery: "Looked up", NetConnect: "Connected to",
+      FileWrite: "Wrote files in", FileRead: "Read files in",
+      RegPersist: "Changed startup setting" })[kind] || kind;
+  }
+
   function alertHTML(a) {
     const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
     return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}">
       <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
       ${steps ? `<ol>${steps}</ol>` : ""}
+      ${causeHTML(a.evidence)}
       <div class="act" id="acts-${a.id}">
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
         <button class="btn" data-allow="${a.id}" title="Stop warning about this program contacting this destination. Other programs and destinations are unaffected.">This is expected — always allow</button>
