@@ -2,6 +2,8 @@ module github.com/threattape/nitewatch/agent
 
 go 1.25.0
 
+toolchain go1.25.12
+
 require (
 	github.com/0xrawsec/golang-etw v1.6.2
 	github.com/ShaneDolphin/gorapide v0.0.0-20260712235008-08752c7ea938
