@@ -122,3 +122,59 @@ func TestEmptyStoreIsUsable(t *testing.T) {
 		t.Error("empty store must not match")
 	}
 }
+
+// Emerging Threats ships C2 addresses inside bracketed rule lists, not one per
+// line. $HOME_NET placeholders and private ranges must never become indicators.
+func TestSuricataRuleExtraction(t *testing.T) {
+	const rule = `alert ip [1.2.3.4,5.6.7.8,192.168.1.1] any -> $HOME_NET any (msg:"ET CNC Shadowserver Reported CnC Server IP group 1"; reference:url,doc.emergingthreats.net/bin/view/Main/BotCC; sid:2404000; rev:5555;)
+# comment line 10.0.0.1
+alert ip [9.9.9.9] any -> $HOME_NET any (msg:"group 2"; sid:2404002;)`
+	s := New()
+	if err := s.LoadList(strings.NewReader(rule), Source{
+		Name: "et-botcc", Kind: KindSuricataRule, Confidence: Malicious, Reason: "C2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{"1.2.3.4", "5.6.7.8", "9.9.9.9"} {
+		if _, ok := s.FlagIP(ip); !ok {
+			t.Errorf("%s should be extracted from the rule", ip)
+		}
+	}
+	// Private addresses inside rules are placeholders, never indicators.
+	if _, ok := s.FlagIP("192.168.1.1"); ok {
+		t.Error("private address must not become an indicator")
+	}
+	if _, ok := s.FlagIP("10.0.0.1"); ok {
+		t.Error("comment lines must be skipped entirely")
+	}
+}
+
+// Tor CollecTor exit lists carry both the relay's published Address and the
+// ExitAddress traffic actually emerges from. Only the latter is the indicator.
+func TestTorExitListUsesExitAddressOnly(t *testing.T) {
+	const exitList = `@type tordnsel 1.0
+ExitNode 0011BD2485AD45D984EC4159C88FC066E5E3300E
+Published 2026-07-26 01:00:00
+LastStatus 2026-07-26 02:00:00
+ExitAddress 171.25.193.9 2026-07-26 02:12:00
+ExitNode AAAA1111
+Address 5.5.5.5
+ExitAddress 185.220.101.1 2026-07-26 02:15:00`
+	s := New()
+	if err := s.LoadList(strings.NewReader(exitList), Source{
+		Name: "tor-exits", Kind: KindTorExitList, Confidence: Context, Reason: "Tor exit",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ip := range []string{"171.25.193.9", "185.220.101.1"} {
+		m, ok := s.FlagIP(ip)
+		if !ok {
+			t.Errorf("%s should be an exit address", ip)
+		} else if m.Confidence != Context {
+			t.Errorf("%s should be context confidence", ip)
+		}
+	}
+	if _, ok := s.FlagIP("5.5.5.5"); ok {
+		t.Error("a relay's published Address is not an exit address")
+	}
+}

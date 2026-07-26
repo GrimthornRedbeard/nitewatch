@@ -1,0 +1,79 @@
+NiteWatch — Third-Party Data Notices
+====================================
+
+NiteWatch matches network destinations against public threat-intelligence data
+that is downloaded to, and cached on, the user's own machine. The following
+notices are required by the terms under which that data is provided, and must
+be reproduced in product documentation and in any "About"/legal screen.
+
+See docs/feed-licensing.md for the full per-source licensing analysis.
+
+
+Emerging Threats Open (Proofpoint)
+----------------------------------
+Botnet command-and-control indicators are sourced from the Emerging Threats
+Open ruleset.
+
+  Copyright (c) 2003-2026, Emerging Threats
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+  * Neither the name of the nor the names of its contributors may be used to
+    endorse or promote products derived from this software without specific
+    prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+NiteWatch is not endorsed by, affiliated with, or sponsored by Emerging
+Threats or Proofpoint.
+
+
+abuse.ch Feodo Tracker
+----------------------
+Botnet command-and-control indicators are also sourced from abuse.ch Feodo
+Tracker, published under a CC0 public-domain dedication:
+
+  "All datasets offered by Feodo Tracker can be used for both, commercial and
+  non-commercial purpose without any limitations (CC0)."
+  — https://feodotracker.abuse.ch/blocklist/
+
+NiteWatch is not endorsed by, affiliated with, or sponsored by abuse.ch.
+
+
+The Tor Project — exit-node list
+--------------------------------
+Tor exit-node addresses are sourced from Tor Project CollecTor, published
+under a CC0 no-copyright declaration:
+
+  "To the extent possible under law, the Tor Project has waived all copyright
+  and related or neighboring rights in the data."
+  — https://metrics.torproject.org/
+
+"Tor" is a trademark of The Tor Project, Inc. NiteWatch is not endorsed by,
+affiliated with, or sponsored by The Tor Project. The Tor name is used here
+only descriptively, to identify the source of this data and the nature of the
+addresses it contains.
+
+
+Address-ownership data (ip2asn)
+-------------------------------
+Network ownership and country attribution are sourced from the ip2asn dataset
+published at https://iptoasn.com/ ("The data is provided as-is, free of charge,
+under a public domain dedication").

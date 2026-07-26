@@ -10,6 +10,8 @@ package intel
 import (
 	"bufio"
 	"io"
+	"net"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -47,6 +49,12 @@ type Kind int
 const (
 	KindIP Kind = iota
 	KindDomain
+	// KindSuricataRule extracts addresses from Suricata/Snort rule files, where
+	// indicators appear inside bracketed address lists rather than one per line.
+	KindSuricataRule
+	// KindTorExitList extracts addresses from the Tor CollecTor exit-list
+	// format, where addresses follow "ExitAddress" keys.
+	KindTorExitList
 )
 
 // Store holds the loaded feed data.
@@ -88,6 +96,15 @@ func (s *Store) LoadList(r io.Reader, src Source) error {
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 			continue
 		}
+		// Rule files and the Tor exit-list format carry many indicators per
+		// line, so they are extracted rather than split.
+		if src.Kind == KindSuricataRule || src.Kind == KindTorExitList {
+			for _, ip := range extractIPs(line, src.Kind) {
+				entries[ip] = m
+			}
+			continue
+		}
+
 		field := line
 		if i := strings.IndexAny(field, ",\t"); i >= 0 {
 			field = strings.TrimSpace(field[:i])
@@ -131,6 +148,33 @@ func (s *Store) LoadList(r io.Reader, src Source) error {
 		dst[k] = v
 	}
 	return nil
+}
+
+// ipv4Re matches dotted-quad addresses. Deliberately loose: candidates are
+// validated by net.ParseIP below rather than by regex precision.
+var ipv4Re = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+
+// extractIPs pulls indicator addresses out of formats that carry several per
+// line. For Tor exit lists only "ExitAddress" lines matter — the "Address" key
+// is the relay's published address, not the address traffic emerges from.
+func extractIPs(line string, kind Kind) []string {
+	if kind == KindTorExitList && !strings.HasPrefix(line, "ExitAddress ") {
+		return nil
+	}
+	var out []string
+	for _, cand := range ipv4Re.FindAllString(line, -1) {
+		ip := net.ParseIP(cand)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		// Rule files reference $HOME_NET-style placeholders and example ranges;
+		// non-routable addresses are never useful indicators.
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, ip.String())
+	}
+	return out
 }
 
 // FlagIP reports whether an address appears on a loaded feed.

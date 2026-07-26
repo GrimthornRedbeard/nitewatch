@@ -13,28 +13,44 @@ import (
 
 // DefaultSources are the public feeds NiteWatch matches against.
 //
-// Tor exits are deliberately Context, not Malicious: using Tor is legitimate,
-// and auto-flagging it would both slander normal users and train people to
-// ignore alerts. It contributes to a verdict, never causes one alone.
+// LICENSING IS A SHIPPING CONSTRAINT HERE, NOT A FOOTNOTE. This product is
+// commercial and closed-source, and it caches feed data on customer machines —
+// which is redistribution, not merely use. Only sources whose terms clearly
+// permit that appear below. See docs/feed-licensing.md for the full analysis
+// and the per-source evidence.
+//
+// Removed 2026-07-26 after review: abuse.ch ThreatFox and URLhaus. Both
+// carried CC0 grants explicitly permitting commercial use; abuse.ch REMOVED
+// those grants (URLhaus 2024-12, ThreatFox 2025-03) and its umbrella Terms of
+// Use now route commercial users to a paid Spamhaus subscription. The legacy
+// unauthenticated export endpoints still respond, but a working URL is not a
+// licence. Do not re-add them without a written agreement.
 var DefaultSources = []Source{
 	{
-		Name: "feodo", URL: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+		// CC0, stated on the blocklist page: usable commercially "without any
+		// limitations". Note the feed has been stale since 2026-03 and its
+		// recommended list is near-empty — kept because the grant is clean, not
+		// because it is currently productive.
+		Name: "feodo", URL: "https://feodotracker.abuse.ch/downloads/ipblocklist_aggressive.txt",
 		Kind: KindIP, Confidence: Malicious,
 		Reason: "listed by abuse.ch Feodo Tracker as botnet command-and-control infrastructure",
 	},
 	{
-		Name: "threatfox", URL: "https://threatfox.abuse.ch/export/csv/ip-port/recent/",
-		Kind: KindIP, Confidence: Malicious,
-		Reason: "listed by abuse.ch ThreatFox as a malware command-and-control address",
+		// BSD 3-Clause (Emerging Threats Open). Commercial use permitted with
+		// the copyright notice reproduced — see NOTICE. This is the botnet
+		// command-and-control destination set: the RIGHT data for watching
+		// outbound connections, unlike attack-source feeds which list inbound
+		// scanners a home router already drops.
+		Name: "et-botcc", URL: "https://rules.emergingthreats.net/blockrules/emerging-botcc.rules",
+		Kind: KindSuricataRule, Confidence: Malicious,
+		Reason: "listed by Emerging Threats as botnet command-and-control infrastructure",
 	},
 	{
-		Name: "urlhaus", URL: "https://urlhaus.abuse.ch/downloads/text/",
-		Kind: KindDomain, Confidence: Malicious,
-		Reason: "listed by abuse.ch URLhaus as distributing malware",
-	},
-	{
-		Name: "tor-exits", URL: "https://check.torproject.org/torbulkexitlist",
-		Kind: KindIP, Confidence: Context,
+		// CC0 via the Tor Project. Served from CollecTor, which sits under the
+		// site carrying the CC0 declaration; check.torproject.org publishes no
+		// licence of its own.
+		Name: "tor-exits", URL: "https://collector.torproject.org/recent/exit-lists/",
+		Kind: KindTorExitList, Confidence: Context,
 		Reason: "a Tor exit node — normal for some software, notable for others",
 	},
 }
