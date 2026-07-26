@@ -54,6 +54,11 @@ func (w *Window) Ingest(e event.NormalizedEvent) gr.EventID {
 // events arriving after the rotation still attribute to their process.
 func (w *Window) rotate() {
 	fresh := New()
+	// Carry name resolutions forward. Dropping them made every connection
+	// arriving just after a rotation look like a bare-address contact, which
+	// is precisely what the "connected without looking it up" rule fires on —
+	// the agent manufacturing its own false positives at a size boundary.
+	fresh.SeedDNSAnswers(w.cur.DNSAnswers())
 	for _, proc := range w.live {
 		fresh.Ingest(proc)
 	}

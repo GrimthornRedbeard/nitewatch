@@ -43,6 +43,34 @@ func (g *Graph) ImageFor(pid uint32) string { return g.procImage[pid] }
 // DNS resolution, or "" if the connection went to a raw IP with no lookup.
 func (g *Graph) DomainFor(id gr.EventID) string { return g.connDomain[id] }
 
+// KnownNameFor reports the domain most recently resolved to an address by ANY
+// process, independent of poset nodes. Used to carry resolutions across a
+// window rotation.
+func (g *Graph) KnownNameFor(ip string) string { return g.dnsByIP[ip].name }
+
+// DNSAnswers exports the address-to-name map so a fresh window generation can
+// inherit it. Without this, every rotation blinds the DNS join and connections
+// that DID follow a lookup are reported as bare-address contacts.
+func (g *Graph) DNSAnswers() map[string]string {
+	out := make(map[string]string, len(g.dnsByIP))
+	for ip, rec := range g.dnsByIP {
+		out[ip] = rec.name
+	}
+	return out
+}
+
+// SeedDNSAnswers restores name resolutions into a new generation. The causal
+// edge back to the original DNSQuery node is necessarily lost — that event is
+// gone — but the NAME survives, which is what the ledger and the "did this
+// program look it up?" test both depend on.
+func (g *Graph) SeedDNSAnswers(answers map[string]string) {
+	for ip, name := range answers {
+		if _, exists := g.dnsByIP[ip]; !exists {
+			g.dnsByIP[ip] = dnsRecord{name: name}
+		}
+	}
+}
+
 // Ingest adds one normalized event to the poset, wiring causal edges, and
 // returns the new node's EventID.
 func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
@@ -83,7 +111,11 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 		}
 		if rec, ok := g.dnsByIP[e.RemoteIP]; ok {
 			g.connDomain[ev.ID] = rec.name
-			_ = g.p.AddCausal(rec.node, ev.ID)
+			// A seeded resolution carried across a rotation has no surviving
+			// node to link to; the name is still valid.
+			if rec.node != "" {
+				_ = g.p.AddCausal(rec.node, ev.ID)
+			}
 		}
 	default:
 		if proc, ok := g.procNode[e.PID]; ok {

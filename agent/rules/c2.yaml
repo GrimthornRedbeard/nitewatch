@@ -31,12 +31,13 @@ rules:
     detector: raw-ip-no-dns
     title: "{{.ProcessName}} connected to a numeric address without looking it up"
     narrative: |
-      {{.ProcessName}} connected straight to {{.RemoteIP}} without first asking
-      for a website name — the step almost every normal program takes.
+      {{.ProcessName}} connected straight to {{.RemoteIP}}{{if .Owner}}, a network
+      operated by {{.Owner}},{{end}} without any name lookup being seen first.
 
-      Software that hides its destination this way is often built to avoid
-      leaving a trace. Some legitimate programs do it too, so this is worth
-      checking rather than panicking over.
+      Some malware uses hard-coded addresses to avoid leaving a trace. But there
+      are ordinary explanations too — the program may have looked the name up
+      minutes ago, or used encrypted DNS, which this tool cannot see. Treat this
+      as a prompt to check what {{.ProcessName}} is, not as a finding against it.
     playbook:
       - "Do you recognise {{.ProcessName}}? If not, look it up before doing anything else."
       - "Check who owns the address it contacted: {{.RemoteIP}}{{if .Owner}} (currently registered to {{.Owner}}){{end}}."

@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	gr "github.com/ShaneDolphin/gorapide"
@@ -73,7 +75,13 @@ type Collector struct {
 
 	imageCache map[uint32]string
 	suppress   *detect.Suppressor
-	files      *filewatch.Tracker
+	// selfPID and selfImage identify this agent, so it never reports on its own
+	// activity. It downloads threat feeds and an address-ownership dataset, and
+	// alerting on that is both wrong and corrosive: a tool that cries wolf about
+	// itself is one nobody believes about anything else.
+	selfPID   uint32
+	selfImage string
+	files     *filewatch.Tracker
 
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
@@ -103,6 +111,8 @@ func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Colle
 		opts:       opts,
 		imageCache: make(map[uint32]string),
 		suppress:   detect.NewSuppressor(),
+		selfPID:    uint32(os.Getpid()),
+		selfImage:  strings.ToLower(selfExecutable()),
 		files:      filewatch.NewTracker(),
 	}
 }
@@ -147,11 +157,16 @@ func (c *Collector) Run(ctx context.Context) error {
 func (c *Collector) ingest(e event.NormalizedEvent) {
 	id := c.window.Ingest(e)
 
+	// The agent's own traffic is still RECORDED — the ledger should show what
+	// this software does, and hiding it would be exactly the behaviour it warns
+	// about — but it is never a finding about the user's machine.
+	selfEvent := c.isSelf(e)
+
 	switch e.Kind {
 	case event.KindProcStart:
 		// Backup-destruction tools are judged the moment they start: by the
 		// time they finish, the restore points are already gone.
-		if c.opts.Detect != nil && filewatch.ShadowCopyTool(e.Image) {
+		if c.opts.Detect != nil && !selfEvent && filewatch.ShadowCopyTool(e.Image) {
 			c.reportFile(detect.FileSubject{
 				PID: e.PID, Image: e.Image, ToolRun: shortBase(e.Image),
 			}, e.Time)
@@ -163,7 +178,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		// name is the field users act on.
 		delete(c.imageCache, e.PID)
 	case event.KindFileWrite:
-		if c.opts.Detect != nil {
+		if c.opts.Detect != nil && !selfEvent {
 			c.onFileWrite(e)
 		}
 		return
@@ -231,7 +246,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 	}
 	_ = c.ledger.RecordConnectionDedup(conn, c.dedupWindow())
 
-	if c.opts.Detect != nil {
+	if c.opts.Detect != nil && !selfEvent {
 		c.runDetections(e, conn, info, domain)
 	}
 }
@@ -327,6 +342,30 @@ func (c *Collector) pruneLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// isSelf reports whether an event describes this agent's own activity.
+func (c *Collector) isSelf(e event.NormalizedEvent) bool {
+	if c.selfPID != 0 && e.PID == c.selfPID {
+		return true
+	}
+	if c.selfImage == "" {
+		return false
+	}
+	img := e.Image
+	if img == "" {
+		img = c.window.Current().ImageFor(e.PID)
+	}
+	return img != "" && strings.EqualFold(img, c.selfImage)
+}
+
+// selfExecutable resolves this agent's own image path.
+func selfExecutable() string {
+	p, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 // config returns the effective settings, preferring the live store.

@@ -201,3 +201,53 @@ func TestNilIntelStoreDisablesFeedDetectorOnly(t *testing.T) {
 		t.Error("other detectors must still work without feeds")
 	}
 }
+
+// Reported from a live machine: NiteWatch alerted on ITSELF downloading threat
+// feeds from Fastly. Three causes, all fixed — this covers the rule itself.
+//
+// "No lookup was observed" is not "no lookup happened". DNS-over-HTTPS produces
+// no DNS telemetry at all, and cached or configured addresses are resolved long
+// before the connection. A bare-address contact to shared infrastructure is the
+// normal shape of the modern web, not evidence of hiding.
+func TestRawIPRuleIgnoresSharedInfrastructure(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+
+	cdn := Subject{
+		Event:  event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		Conn:   ledger.Connection{Image: `C:\App\app.exe`, RemoteIP: "151.101.54.49", RemotePort: 443},
+		Recon:  recon.Info{ASN: 54113, Org: "FASTLY", Country: "US"},
+		HadDNS: false, FirstContact: true,
+	}
+	if d := find(e.Evaluate(cdn), "c2-raw-ip-no-dns"); d != nil {
+		t.Error("a bare-address contact to a CDN is ordinary and must not alert")
+	}
+
+	// Same shape, but a network that is not shared hosting: still worth a look.
+	obscure := cdn
+	obscure.Conn.RemoteIP = "203.0.113.9"
+	obscure.Recon = recon.Info{ASN: 64500, Org: "SOME-SMALL-HOSTING-LLC", Country: "RU"}
+	if d := find(e.Evaluate(obscure), "c2-raw-ip-no-dns"); d == nil {
+		t.Error("a bare-address contact to unremarkable hosting should still fire")
+	}
+
+	// A destination we have a name for is identifiable, which is the opposite
+	// of hiding — regardless of where the name came from.
+	named := obscure
+	named.Domain = "known.example"
+	if d := find(e.Evaluate(named), "c2-raw-ip-no-dns"); d != nil {
+		t.Error("a named destination must not fire the bare-address rule")
+	}
+}
+
+func TestSharedInfrastructureRecognition(t *testing.T) {
+	for _, org := range []string{"FASTLY", "CLOUDFLARENET", "AMAZON-02", "GOOGLE-CLOUD-PLATFORM", "AKAMAI-AS"} {
+		if !SharedInfrastructure(org) {
+			t.Errorf("%q should be recognised as shared infrastructure", org)
+		}
+	}
+	for _, org := range []string{"", "SOME-SMALL-HOSTING-LLC", "YANDEX"} {
+		if SharedInfrastructure(org) {
+			t.Errorf("%q must not be treated as shared infrastructure", org)
+		}
+	}
+}

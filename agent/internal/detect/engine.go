@@ -7,6 +7,8 @@
 package detect
 
 import (
+	"strings"
+
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
@@ -134,19 +136,67 @@ func detectIntelHit(s Subject, e *Engine) map[string]any {
 	return nil
 }
 
-// detectRawIPNoDNS fires when a program dials a bare address it never looked
-// up. Normal software resolves names; malware often carries hardcoded addresses
-// precisely to avoid leaving DNS evidence.
+// detectRawIPNoDNS fires when a program dials a bare address it never looked up.
+// Malware often carries hardcoded addresses precisely to avoid leaving DNS
+// evidence.
+//
+// The hard part is that "no lookup was observed" is NOT the same as "no lookup
+// happened", and the gap is large enough to sink the rule if ignored:
+//
+//   - DNS-over-HTTPS. Firefox, Chrome, Edge and Windows itself increasingly
+//     resolve over HTTPS, which produces no DNS-Client telemetry at all. Every
+//     connection a DoH browser makes looks like a bare-address contact.
+//   - Cached and configured addresses. A program that resolved a name an hour
+//     ago, or reads an address from config, legitimately connects with no
+//     lookup nearby.
+//   - CDN and cloud infrastructure. Content is served from pools of addresses
+//     that clients reach directly and constantly.
+//
+// So a bare-address contact to SHARED INFRASTRUCTURE is not evidence of
+// anything — it is the normal shape of the modern web. The rule therefore fires
+// only for destinations on networks that are not shared hosting. Traffic to
+// genuinely malicious infrastructure is caught by the feed rule regardless of
+// how the address was obtained.
 func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
-	if s.HadDNS || s.Conn.Inbound {
+	if s.HadDNS || s.Conn.Inbound || !s.FirstContact {
 		return nil
 	}
-	// Only meaningful for a destination we have never seen this process use —
-	// otherwise every long-lived connection re-fires.
-	if !s.FirstContact {
+	// A name from any source (including reverse DNS) means the destination is
+	// identifiable, which is the opposite of hiding.
+	if s.Domain != "" {
+		return nil
+	}
+	if SharedInfrastructure(s.Recon.Org) {
 		return nil
 	}
 	return map[string]any{}
+}
+
+// sharedInfraTokens identify networks that host everyone's traffic. Substring
+// matching is correct here, unlike for publisher trust: this list only
+// SUPPRESSES a weak signal, so a false match costs sensitivity rather than
+// granting trust, and AS names carry inconsistent suffixes
+// ("CLOUDFLARENET", "AMAZON-02", "GOOGLE-CLOUD-PLATFORM").
+var sharedInfraTokens = []string{
+	"cloudflare", "fastly", "akamai", "amazon", "aws", "google", "microsoft",
+	"azure", "digitalocean", "linode", "hetzner", "ovh", "cloudfront",
+	"edgecast", "stackpath", "bunny", "vercel", "netlify", "oracle", "alibaba",
+	"apple", "facebook", "meta", "cdn77", "limelight", "incapsula", "sucuri",
+	"github", "gitlab", "leaseweb", "godaddy", "automattic",
+}
+
+// SharedInfrastructure reports whether an AS owner is a CDN or cloud provider.
+func SharedInfrastructure(org string) bool {
+	if org == "" {
+		return false
+	}
+	o := strings.ToLower(org)
+	for _, t := range sharedInfraTokens {
+		if strings.Contains(o, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // detectUnsignedOutbound fires when an unsigned program makes its first
