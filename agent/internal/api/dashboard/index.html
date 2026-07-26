@@ -102,7 +102,12 @@
   .alert p { margin: 0 0 10px; color: #cfd6e4; font-size: 13px; white-space: pre-wrap; }
   .alert ol { margin: 0; padding-left: 20px; color: #cfd6e4; font-size: 13px; }
   .alert ol li { margin-bottom: 4px; }
-  .alert .act { margin-top: 10px; }
+  .alert .act { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .alert .fix { border-color: #3d5a80; background: #16283d; color: #cfe4ff; }
+  .alert .fix:hover { border-color: var(--accent); }
+  .alert .fix.hard { border-color: #6a2a2a; background: #2a1414; color: #ffb3b3; }
+  .actmsg { font-size: 12px; margin-top: 8px; color: #7ddc9a; }
+  .actmsg.bad { color: #ff9f9f; }
   .alert.acked { opacity: .55; }
   .why { color: var(--muted); font-size: 12px; margin-top: 16px;
     border-top: 1px solid var(--line); padding-top: 12px; }
@@ -195,6 +200,11 @@
 <script>
   let all = [];
   const $ = (id) => document.getElementById(id);
+
+  // Mutating endpoints require this header; it is what stops another site's
+  // page from telling this agent to kill a process.
+  const NW = {"X-NiteWatch": "1"};
+  const post = (url) => fetch(url, {method: "POST", headers: NW});
 
   function shortImage(p) {
     if (!p) return "(unknown)";
@@ -330,7 +340,8 @@
     };
     try {
       const r = await fetch("/api/settings", {
-        method: "PUT", headers: {"Content-Type": "application/json"},
+        method: "PUT",
+        headers: {"Content-Type": "application/json", ...NW},
         body: JSON.stringify(body),
       });
       if (!r.ok) return;
@@ -394,10 +405,11 @@
       <h3><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
       ${steps ? `<ol>${steps}</ol>` : ""}
-      <div class="act">
+      <div class="act" id="acts-${a.id}">
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
         <button class="btn" data-allow="${a.id}" title="Stop warning about this program contacting this destination. Other programs and destinations are unaffected.">This is expected — always allow</button>
       </div>
+      <div class="actmsg" id="msg-${a.id}" hidden></div>
     </div>`;
   }
   async function refreshAlerts() {
@@ -408,19 +420,63 @@
       box.innerHTML = open.map(alertHTML).join("");
       box.querySelectorAll("[data-allow]").forEach(b => {
         b.addEventListener("click", async () => {
-          await fetch("/api/alerts/allow?id=" + encodeURIComponent(b.dataset.allow), {method: "POST"});
+          await post("/api/alerts/allow?id=" + encodeURIComponent(b.dataset.allow));
           refreshAlerts();
         });
       });
       box.querySelectorAll("[data-ack]").forEach(b => {
         b.addEventListener("click", async () => {
-          await fetch("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack), {method: "POST"});
+          await post("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack));
           refreshAlerts();
         });
       });
       document.title = open.length ? `(${open.length}) NiteWatch` : "NiteWatch — Who's Talking?";
+      open.forEach(a => loadActions(a));
     } catch (e) { /* ignore */ }
   }
+  // Remediation buttons are added only after asking the agent what it can
+  // actually do for this alert — offering a fix that cannot run is worse than
+  // offering none.
+  async function loadActions(a) {
+    try {
+      const r = await (await fetch("/api/actions?alert=" + encodeURIComponent(a.id))).json();
+      if (!r.available || !(r.actions || []).length) return;
+      const box = $("acts-" + a.id);
+      if (!box || box.dataset.loaded) return;
+      box.dataset.loaded = "1";
+      for (const act of r.actions) {
+        const b = document.createElement("button");
+        b.className = "btn fix" + (act.reversible ? "" : " hard");
+        b.textContent = act.label + (act.reversible ? "" : " (cannot be undone)");
+        b.title = act.detail;
+        b.addEventListener("click", async () => {
+          if (!confirm(act.detail + "\n\nContinue?")) return;
+          b.disabled = true;
+          const res = await (await post("/api/actions/run?alert=" + encodeURIComponent(a.id) +
+            "&kind=" + encodeURIComponent(act.kind))).json();
+          const m = $("msg-" + a.id);
+          m.hidden = false;
+          m.className = "actmsg" + (res.ok ? "" : " bad");
+          m.textContent = res.message || (res.ok ? "Done." : "That did not work.");
+          if (res.ok && res.undoable) {
+            const u = document.createElement("button");
+            u.className = "btn";
+            u.style.marginLeft = "8px";
+            u.textContent = "Undo";
+            u.addEventListener("click", async () => {
+              const ur = await (await post("/api/actions/undo?id=" + encodeURIComponent(res.actionId))).json();
+              m.textContent = ur.message || "Undone.";
+              u.remove();
+            });
+            m.appendChild(u);
+          }
+          refreshAlerts();
+        });
+        box.appendChild(b);
+      }
+    } catch (e) { /* leave the alert without action buttons */ }
+  }
+
   async function refresh() {
     refreshAlerts();
     try {

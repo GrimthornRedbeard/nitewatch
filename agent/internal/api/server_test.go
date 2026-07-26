@@ -72,3 +72,67 @@ func TestLoopbackOnlyAddr(t *testing.T) {
 		t.Fatalf("server must bind loopback only, got %q", srv.Addr())
 	}
 }
+
+// The API binds loopback and has no authentication, which is right for a local
+// dashboard — but any web page the user visits can make their browser POST to
+// 127.0.0.1, and these endpoints kill processes and move files.
+func TestMutatingEndpointsRejectCrossSiteRequests(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.Handler()
+
+	mutating := []string{
+		"/api/alerts/ack?id=1",
+		"/api/alerts/allow?id=1",
+		"/api/actions/run?alert=1&kind=kill-process",
+		"/api/actions/undo?id=1",
+	}
+	for _, path := range mutating {
+		// No custom header: a plain cross-origin form POST.
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest("POST", path, nil))
+		if rr.Code != 403 {
+			t.Errorf("%s without the guard header = %d, want 403", path, rr.Code)
+		}
+
+		// Header present but the request announces a foreign origin.
+		rr = httptest.NewRecorder()
+		req := httptest.NewRequest("POST", path, nil)
+		req.Header.Set("X-NiteWatch", "1")
+		req.Header.Set("Origin", "https://evil.example")
+		h.ServeHTTP(rr, req)
+		if rr.Code != 403 {
+			t.Errorf("%s with a foreign Origin = %d, want 403", path, rr.Code)
+		}
+	}
+}
+
+func TestSettingsReadIsAllowedButWriteIsGuarded(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.Handler()
+
+	// Reading configuration changes nothing, so the panel must still load.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/api/settings", nil))
+	if rr.Code == 403 {
+		t.Error("GET /api/settings must not be blocked by the mutation guard")
+	}
+
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("PUT", "/api/settings", strings.NewReader("{}")))
+	if rr.Code != 403 {
+		t.Errorf("PUT /api/settings without the guard header = %d, want 403", rr.Code)
+	}
+}
+
+// Actions must be re-derived from the stored alert, never taken from the
+// request, so a crafted call cannot name an arbitrary process or file.
+func TestRunActionRejectsActionsNotOfferedForTheAlert(t *testing.T) {
+	srv := newTestServer(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/actions/run?alert=999&kind=quarantine-file", nil)
+	req.Header.Set("X-NiteWatch", "1")
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code == 200 {
+		t.Fatal("an action for a nonexistent alert must not execute")
+	}
+}

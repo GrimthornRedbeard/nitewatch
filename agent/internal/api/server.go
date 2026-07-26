@@ -10,11 +10,13 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 )
 
@@ -28,6 +30,7 @@ type Server struct {
 	ledger   *ledger.DB
 	settings *settings.Store
 	suppress *detect.Suppressor
+	exec     respond.Executor
 	addr     string
 
 	mu     sync.RWMutex
@@ -50,6 +53,14 @@ func New(led *ledger.DB) *Server {
 // same gates the collector consults.
 func (s *Server) WithSuppressor(sup *detect.Suppressor) *Server {
 	s.suppress = sup
+	return s
+}
+
+// WithExecutor enables one-click remediation. Without it the dashboard shows
+// alerts and playbook text only — which is a complete, useful product, so this
+// stays optional rather than required.
+func (s *Server) WithExecutor(e respond.Executor) *Server {
+	s.exec = e
 	return s
 }
 
@@ -100,11 +111,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
 	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.handleSettings(w, r) // reading configuration changes nothing
+			return
+		}
+		guardMutation(s.handleSettings)(w, r)
+	})
 	mux.HandleFunc("/api/story", s.handleStory)
 	mux.HandleFunc("/api/alerts", s.handleAlerts)
-	mux.HandleFunc("/api/alerts/ack", s.handleAckAlert)
-	mux.HandleFunc("/api/alerts/allow", s.handleAllowAlert)
+	mux.HandleFunc("/api/alerts/ack", guardMutation(s.handleAckAlert))
+	mux.HandleFunc("/api/alerts/allow", guardMutation(s.handleAllowAlert))
+	mux.HandleFunc("/api/actions", s.handleActions)
+	mux.HandleFunc("/api/actions/run", guardMutation(s.handleRunAction))
+	mux.HandleFunc("/api/actions/undo", guardMutation(s.handleUndoAction))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -279,6 +299,35 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// guardMutation protects state-changing endpoints from cross-site requests.
+//
+// The API is unauthenticated because it binds loopback, which is the right call
+// for a local dashboard — but "loopback" does not mean "only our page". Any web
+// page the user visits can make its browser POST to 127.0.0.1, and these
+// endpoints kill processes and move files. Two defences, both cheap:
+//
+//   - Require a custom header. Cross-origin JavaScript cannot set one without a
+//     CORS preflight, and we answer no preflight, so the request never fires.
+//   - Reject any request carrying a foreign Origin outright.
+func guardMutation(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && !isLocalOrigin(origin) {
+			http.Error(w, "cross-site requests are not accepted", http.StatusForbidden)
+			return
+		}
+		if r.Header.Get("X-NiteWatch") == "" {
+			http.Error(w, "missing X-NiteWatch header", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func isLocalOrigin(origin string) bool {
+	return strings.HasPrefix(origin, "http://127.0.0.1:") ||
+		strings.HasPrefix(origin, "http://localhost:")
+}
+
 func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -327,6 +376,113 @@ func (s *Server) handleAllowAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.ledger.AckAlert(id)
 	writeJSON(w, map[string]any{"ok": true, "allowed": key})
+}
+
+// handleActions lists the remediations available for an alert. Read-only:
+// nothing here changes the machine.
+func (s *Server) handleActions(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.URL.Query().Get("alert"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid alert id", http.StatusBadRequest)
+		return
+	}
+	a, err := s.ledger.AlertByID(id)
+	if err != nil {
+		http.Error(w, "no such alert", http.StatusNotFound)
+		return
+	}
+	acts := respond.Suggest(a.Area, a.Severity, a.Evidence)
+	writeJSON(w, map[string]any{
+		"available": s.exec != nil,
+		"actions":   acts,
+	})
+}
+
+// handleRunAction executes one remediation. POST only, and only ever in
+// response to an explicit user click — there is no automatic path here.
+func (s *Server) handleRunAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.exec == nil {
+		http.Error(w, "remediation is not available on this system", http.StatusServiceUnavailable)
+		return
+	}
+	alertID, err := strconv.ParseInt(r.URL.Query().Get("alert"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid alert id", http.StatusBadRequest)
+		return
+	}
+	kind := respond.Kind(r.URL.Query().Get("kind"))
+
+	a, err := s.ledger.AlertByID(alertID)
+	if err != nil {
+		http.Error(w, "no such alert", http.StatusNotFound)
+		return
+	}
+
+	// Re-derive the action from the stored alert rather than trusting the
+	// request body: a caller must not be able to name an arbitrary process to
+	// kill or file to move by hand-crafting a request to the local API.
+	var chosen *respond.Action
+	for _, act := range respond.Suggest(a.Area, a.Severity, a.Evidence) {
+		if act.Kind == kind {
+			c := act
+			chosen = &c
+			break
+		}
+	}
+	if chosen == nil {
+		http.Error(w, "that action is not offered for this alert", http.StatusBadRequest)
+		return
+	}
+
+	res := s.exec.Execute(*chosen)
+	rec := ledger.ActionRecord{
+		Time: time.Now(), AlertID: alertID, Kind: string(chosen.Kind),
+		Label: chosen.Label, Params: chosen.Params,
+		OK: res.OK, Message: res.Message, Undo: res.Undo,
+	}
+	recID, _ := s.ledger.RecordAction(rec)
+	if res.OK {
+		_ = s.ledger.AckAlert(alertID)
+	}
+	writeJSON(w, map[string]any{
+		"ok": res.OK, "message": res.Message,
+		"actionId": recID, "undoable": len(res.Undo) > 0,
+	})
+}
+
+// handleUndoAction reverses a previously executed action.
+func (s *Server) handleUndoAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.exec == nil {
+		http.Error(w, "remediation is not available on this system", http.StatusServiceUnavailable)
+		return
+	}
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid action id", http.StatusBadRequest)
+		return
+	}
+	rec, err := s.ledger.ActionByID(id)
+	if err != nil {
+		http.Error(w, "no such action", http.StatusNotFound)
+		return
+	}
+	if len(rec.Undo) == 0 {
+		http.Error(w, "that action cannot be undone", http.StatusBadRequest)
+		return
+	}
+	res := s.exec.Undo(respond.Action{Kind: respond.Kind(rec.Kind), Params: rec.Params}, rec.Undo)
+	if res.OK {
+		_ = s.ledger.MarkUndone(id)
+	}
+	writeJSON(w, map[string]any{"ok": res.OK, "message": res.Message})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

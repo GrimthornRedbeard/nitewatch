@@ -56,6 +56,97 @@ CREATE TABLE IF NOT EXISTS allowlist (
 	label TEXT NOT NULL DEFAULT ''
 );`
 
+const actionSchema = `
+CREATE TABLE IF NOT EXISTS actions (
+	id       INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts       TEXT NOT NULL,
+	alert_id INTEGER NOT NULL,
+	kind     TEXT NOT NULL,
+	label    TEXT NOT NULL,
+	params   TEXT NOT NULL DEFAULT '{}',
+	ok       INTEGER NOT NULL DEFAULT 0,
+	message  TEXT NOT NULL DEFAULT '',
+	undo     TEXT NOT NULL DEFAULT '{}',
+	undone   INTEGER NOT NULL DEFAULT 0
+);`
+
+// ActionRecord is one remediation the user chose, and what it did.
+//
+// Recorded whether it SUCCEEDED OR FAILED. A record only of successes would
+// hide exactly the case a user needs explained: "I clicked the button and
+// nothing happened."
+type ActionRecord struct {
+	ID      int64
+	Time    time.Time
+	AlertID int64
+	Kind    string
+	Label   string
+	Params  map[string]string
+	OK      bool
+	Message string
+	Undo    map[string]string
+	Undone  bool
+}
+
+// RecordAction appends to the action audit log and returns its id.
+func (d *DB) RecordAction(a ActionRecord) (int64, error) {
+	params, _ := json.Marshal(a.Params)
+	undo, _ := json.Marshal(a.Undo)
+	res, err := d.sql.Exec(
+		`INSERT INTO actions (ts, alert_id, kind, label, params, ok, message, undo, undone)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		formatTS(a.Time), a.AlertID, a.Kind, a.Label, string(params), a.OK, a.Message, string(undo))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RecentActions returns the audit log, newest first.
+func (d *DB) RecentActions(limit int) ([]ActionRecord, error) {
+	rows, err := d.sql.Query(
+		`SELECT id, ts, alert_id, kind, label, params, ok, message, undo, undone
+		 FROM actions ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ActionRecord
+	for rows.Next() {
+		var a ActionRecord
+		var ts, params, undo string
+		if err := rows.Scan(&a.ID, &ts, &a.AlertID, &a.Kind, &a.Label,
+			&params, &a.OK, &a.Message, &undo, &a.Undone); err != nil {
+			return nil, err
+		}
+		a.Time = parseTS(ts)
+		_ = json.Unmarshal([]byte(params), &a.Params)
+		_ = json.Unmarshal([]byte(undo), &a.Undo)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ActionByID fetches one audit entry, for undo.
+func (d *DB) ActionByID(id int64) (ActionRecord, error) {
+	all, err := d.RecentActions(1000)
+	if err != nil {
+		return ActionRecord{}, err
+	}
+	for _, a := range all {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return ActionRecord{}, sql.ErrNoRows
+}
+
+// MarkUndone records that an action was reversed.
+func (d *DB) MarkUndone(id int64) error {
+	_, err := d.sql.Exec(`UPDATE actions SET undone = 1 WHERE id = ?`, id)
+	return err
+}
+
 // AddAllow persists a user's "always allow" decision.
 func (d *DB) AddAllow(key, label string, at time.Time) error {
 	_, err := d.sql.Exec(

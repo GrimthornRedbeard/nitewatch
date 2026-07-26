@@ -31,8 +31,10 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/notify"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/recon"
+	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/rules"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
@@ -121,6 +123,7 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 		return fmt.Errorf("open settings: %w", err)
 	}
 	opts.Live = cfg
+	opts.Notify = notify.NewGate(notify.NewWindowsToast())
 	if cfg.Get().Recon {
 		opts.Recon = startRecon()
 	}
@@ -131,7 +134,8 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	// Start the dashboard first so it is reachable even if the sensor can't start.
 	var srv *api.Server
 	if serve {
-		srv = api.New(led).WithSettings(cfg)
+		srv = api.New(led).WithSettings(cfg).
+			WithExecutor(respond.NewWindowsExecutor(filepath.Join(baseDir(), "quarantine")))
 		log.Printf("dashboard: http://%s", srv.Addr())
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {

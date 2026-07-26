@@ -16,6 +16,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/graph"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/notify"
 	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/resolve"
 	"github.com/threattape/nitewatch/agent/internal/settings"
@@ -43,6 +44,8 @@ type Options struct {
 	ImageLookup func(pid uint32) string
 	// Detect, if set, evaluates rules against each recorded connection.
 	Detect *detect.Engine
+	// Notify delivers user-visible notifications for high-severity alerts.
+	Notify *notify.Gate
 	// Live, if set, supersedes the static fields above: it is read on every
 	// connection so dashboard edits take effect without a restart (restarting
 	// would discard the live causal window).
@@ -372,7 +375,12 @@ func (c *Collector) reportAutostart(ch autostart.Change) {
 			Evidence:  d.Fields,
 		})
 		if err == nil && created {
-			log.Printf("ALERT [%s] %s", d.Rule.Severity, d.Rule.RenderTitle(d.Fields))
+			title := d.Rule.RenderTitle(d.Fields)
+			log.Printf("ALERT [%s] %s", d.Rule.Severity, title)
+			c.opts.Notify.Deliver(d.Rule.ID, notify.Alert{
+				Severity: string(d.Rule.Severity), Title: title,
+				Body: d.Rule.RenderNarrative(d.Fields),
+			}, time.Now())
 		}
 	}
 }
