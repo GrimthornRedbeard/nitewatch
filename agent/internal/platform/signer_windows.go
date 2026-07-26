@@ -3,7 +3,9 @@
 package platform
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -21,11 +23,21 @@ type signerResult struct {
 // FileSigner reports whether an executable carries a valid Authenticode
 // signature and, if so, the subject name of the signing certificate.
 //
-// Uses PowerShell's Get-AuthenticodeSignature rather than binding wintrust
-// directly: the check runs rarely (once per binary, cached), correctness
-// matters more than speed here, and the API surface for full chain validation
-// is large enough that a wrong binding would silently report "unsigned" — the
-// dangerous direction, since suppression rules trust signatures.
+// SECURITY: the path is passed through an ENVIRONMENT VARIABLE, never
+// interpolated into the script text. Quoting a path into a PowerShell string
+// cannot be made safe by escaping U+0027 alone — the tokenizer also accepts
+// U+2018, U+2019, U+201A and U+201B as string delimiters, so a filename
+// containing a Unicode right-quote closes the literal and everything after it
+// executes. This runs elevated against paths an UNPRIVILEGED user controls
+// (registry Run values, dropped executables), so that was a local privilege
+// escalation to SYSTEM. Environment variables are read as data by $env: and are
+// never parsed as code, which removes the bug class rather than patching one
+// character.
+//
+// Uses PowerShell rather than binding wintrust directly: the check runs rarely
+// (once per binary, cached), and a wrong binding would silently report
+// "unsigned" — the dangerous direction, since suppression rules trust
+// signatures.
 //
 // Only status "Valid" counts as signed. A present-but-untrusted or tampered
 // signature is NOT a signature.
@@ -48,15 +60,19 @@ func FileSigner(path string) (bool, string) {
 	return r.signed, r.signer
 }
 
-func checkSignature(path string) signerResult {
-	// -LiteralPath so paths containing [ ] are not treated as wildcards.
-	script := `$ErrorActionPreference='Stop';` +
-		`$s = Get-AuthenticodeSignature -LiteralPath ` + quotePS(path) + `;` +
-		`if ($s.Status -eq 'Valid') { 'VALID|' + $s.SignerCertificate.Subject } else { 'INVALID|' }`
+// sigScript reads its input from the ENVIRONMENT, so no attacker-controlled
+// text ever becomes part of the script.
+const sigScript = `$ErrorActionPreference='Stop'
+$p = $env:NW_TARGET_PATH
+$s = Get-AuthenticodeSignature -LiteralPath $p
+if ($s.Status -eq 'Valid') { 'VALID|' + $s.SignerCertificate.Subject } else { 'INVALID|' }`
 
-	out, err := exec.Command("powershell.exe",
-		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-Command", script).Output()
+func checkSignature(path string) signerResult {
+	cmd := exec.Command(system32("WindowsPowerShell", "v1.0", "powershell.exe"),
+		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", sigScript)
+	cmd.Env = append(os.Environ(), "NW_TARGET_PATH="+path)
+
+	out, err := cmd.Output()
 	if err != nil {
 		return signerResult{} // unreadable: treat as unsigned, never as trusted
 	}
@@ -80,6 +96,14 @@ func commonName(subject string) string {
 	return strings.TrimSpace(subject)
 }
 
-func quotePS(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+// system32 builds an absolute path under the real system directory. An elevated
+// process must not resolve helper binaries through %PATH%: a user-writable
+// directory on the path (which third-party installers add routinely) would let
+// an unprivileged user plant powershell.exe and have us run it as SYSTEM.
+func system32(parts ...string) string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(append([]string{root, "System32"}, parts...)...)
 }

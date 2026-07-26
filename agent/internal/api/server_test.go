@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,15 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 )
+
+// localReq builds a request that addresses the agent the way a real local
+// client does. httptest defaults Host to "example.com", which the DNS-rebinding
+// guard correctly rejects.
+func localReq(method, target string) *http.Request {
+	r := httptest.NewRequest(method, target, strings.NewReader("{}"))
+	r.Host = "127.0.0.1:8973"
+	return r
+}
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -27,7 +37,7 @@ func newTestServer(t *testing.T) *Server {
 func TestConnectionsEndpointReturnsJSON(t *testing.T) {
 	srv := newTestServer(t)
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/connections?limit=5", nil))
+	srv.Handler().ServeHTTP(rr, localReq("GET", "/api/connections?limit=5"))
 
 	if rr.Code != 200 {
 		t.Fatalf("status = %d", rr.Code)
@@ -43,7 +53,7 @@ func TestConnectionsEndpointReturnsJSON(t *testing.T) {
 func TestTalkersEndpoint(t *testing.T) {
 	srv := newTestServer(t)
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/talkers", nil))
+	srv.Handler().ServeHTTP(rr, localReq("GET", "/api/talkers"))
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "browser.exe") {
 		t.Fatalf("talkers response: %d %s", rr.Code, rr.Body.String())
 	}
@@ -53,7 +63,7 @@ func TestStatusEndpointReflectsSetStatus(t *testing.T) {
 	srv := newTestServer(t)
 	srv.SetStatus(Status{Source: "live-etw", Running: false, Elevated: false, Message: "need admin"})
 	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/api/status", nil))
+	srv.Handler().ServeHTTP(rr, localReq("GET", "/api/status"))
 	if rr.Code != 200 {
 		t.Fatalf("status = %d", rr.Code)
 	}
@@ -89,14 +99,14 @@ func TestMutatingEndpointsRejectCrossSiteRequests(t *testing.T) {
 	for _, path := range mutating {
 		// No custom header: a plain cross-origin form POST.
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest("POST", path, nil))
+		h.ServeHTTP(rr, localReq("POST", path))
 		if rr.Code != 403 {
 			t.Errorf("%s without the guard header = %d, want 403", path, rr.Code)
 		}
 
 		// Header present but the request announces a foreign origin.
 		rr = httptest.NewRecorder()
-		req := httptest.NewRequest("POST", path, nil)
+		req := localReq("POST", path)
 		req.Header.Set("X-NiteWatch", "1")
 		req.Header.Set("Origin", "https://evil.example")
 		h.ServeHTTP(rr, req)
@@ -112,13 +122,13 @@ func TestSettingsReadIsAllowedButWriteIsGuarded(t *testing.T) {
 
 	// Reading configuration changes nothing, so the panel must still load.
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest("GET", "/api/settings", nil))
+	h.ServeHTTP(rr, localReq("GET", "/api/settings"))
 	if rr.Code == 403 {
 		t.Error("GET /api/settings must not be blocked by the mutation guard")
 	}
 
 	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest("PUT", "/api/settings", strings.NewReader("{}")))
+	h.ServeHTTP(rr, localReq("PUT", "/api/settings"))
 	if rr.Code != 403 {
 		t.Errorf("PUT /api/settings without the guard header = %d, want 403", rr.Code)
 	}
@@ -129,10 +139,40 @@ func TestSettingsReadIsAllowedButWriteIsGuarded(t *testing.T) {
 func TestRunActionRejectsActionsNotOfferedForTheAlert(t *testing.T) {
 	srv := newTestServer(t)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/actions/run?alert=999&kind=quarantine-file", nil)
+	req := localReq("POST", "/api/actions/run?alert=999&kind=quarantine-file")
 	req.Header.Set("X-NiteWatch", "1")
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code == 200 {
 		t.Fatal("an action for a nonexistent alert must not execute")
+	}
+}
+
+// Binding 127.0.0.1 does not stop DNS rebinding: an attacker points a hostname
+// they control at 127.0.0.1, and the browser then treats their page as
+// SAME-ORIGIN with this agent — so CORS never applies and the read endpoints,
+// which carry every process path, destination and causal story, are exposed.
+// Same-origin GETs send no Origin header, so only a Host check catches this.
+func TestForeignHostHeaderIsRejected(t *testing.T) {
+	srv := newTestServer(t)
+	h := srv.Handler()
+
+	for _, host := range []string{"evil.example", "evil.example:8973", "127.0.0.1.evil.example:8973"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/connections", nil)
+		req.Host = host
+		h.ServeHTTP(rr, req)
+		if rr.Code != 403 {
+			t.Errorf("Host %q = %d, want 403 — the ledger must not be readable via a rebound hostname", host, rr.Code)
+		}
+	}
+
+	for _, host := range []string{"127.0.0.1:8973", "localhost:8973", "127.0.0.1"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/connections", nil)
+		req.Host = host
+		h.ServeHTTP(rr, req)
+		if rr.Code == 403 {
+			t.Errorf("Host %q was rejected; the local dashboard must still work", host)
+		}
 	}
 }

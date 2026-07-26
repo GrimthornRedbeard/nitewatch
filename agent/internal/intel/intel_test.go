@@ -178,3 +178,25 @@ ExitAddress 185.220.101.1 2026-07-26 02:15:00`
 		t.Error("a relay's published Address is not an exit address")
 	}
 }
+
+// Regression (QA sweep): the extractor scanned the whole rule line, so an
+// address appearing in msg: text or a reference URL became a CRITICAL-severity
+// indicator. A documentation link containing 8.8.8.8 would have flagged every
+// DNS query the user makes.
+func TestSuricataExtractionIgnoresNonIndicatorFields(t *testing.T) {
+	const rule = `alert ip [185.4.3.2] any -> $HOME_NET any (msg:"ET CNC seen contacting 8.8.8.8 relay"; reference:url,example.com/report?ip=1.1.1.1; sid:2404000;)`
+	s := New()
+	if err := s.LoadList(strings.NewReader(rule), Source{
+		Name: "et-botcc", Kind: KindSuricataRule, Confidence: Malicious, Reason: "C2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.FlagIP("185.4.3.2"); !ok {
+		t.Error("the bracketed indicator must still be extracted")
+	}
+	for _, ip := range []string{"8.8.8.8", "1.1.1.1"} {
+		if _, ok := s.FlagIP(ip); ok {
+			t.Errorf("%s appears only in rule metadata and must NOT become an indicator", ip)
+		}
+	}
+}

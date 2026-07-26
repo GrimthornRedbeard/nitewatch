@@ -157,6 +157,10 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		}
 	case event.KindProcExit:
 		c.files.Forget(e.PID)
+		// Windows recycles PIDs aggressively. A cached image for a dead PID
+		// names the wrong program on future connection rows — and the process
+		// name is the field users act on.
+		delete(c.imageCache, e.PID)
 	case event.KindFileWrite:
 		if c.opts.Detect != nil {
 			c.onFileWrite(e)
@@ -240,6 +244,15 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 	if err != nil || id == 0 {
 		return
 	}
+	// Signature data reaches the connection path here. Sources only populate
+	// Signed/Signer on ProcStart, so without this every program — Chrome,
+	// Windows Update, Steam — read as unsigned, the "no publisher signature"
+	// rule fired on all of them, and the suppressor's trusted-publisher gate
+	// was unreachable dead code.
+	if !e.Signed {
+		e.Signed, e.Signer = c.signerOf(imageFor(e, c))
+	}
+
 	subject := detect.Subject{
 		Event:        e,
 		Conn:         conn,
@@ -357,7 +370,17 @@ func shortBase(p string) string {
 
 // reportFile persists and notifies file-activity detections.
 func (c *Collector) reportFile(subj detect.FileSubject, at time.Time) {
+	c.suppress.Observe(subj.Image, at)
 	for _, d := range c.opts.Detect.EvaluateFile(subj) {
+		// File alerts go through the same gates as connection alerts, or
+		// "always allow" silently does nothing for them.
+		if v := c.suppress.Check(d, detect.Subject{
+			Event:  event.NormalizedEvent{Signed: subj.Signed, Signer: subj.Signer},
+			Conn:   ledger.Connection{Image: subj.Image},
+			Domain: subj.Path,
+		}, at); v.Suppressed {
+			continue
+		}
 		// File alerts anchor on the process rather than a connection, so one
 		// encryption sweep produces one alert instead of one per file.
 		anchor := -int64(subj.PID) - 1
@@ -456,7 +479,15 @@ func (c *Collector) reportAutostart(ch autostart.Change) {
 		subj.Signed, subj.Signer = c.opts.SignerLookup(target)
 	}
 
+	c.suppress.Observe(target, time.Now())
 	for _, d := range c.opts.Detect.EvaluatePersistence(subj) {
+		if v := c.suppress.Check(d, detect.Subject{
+			Event:  event.NormalizedEvent{Signed: subj.Signed, Signer: subj.Signer},
+			Conn:   ledger.Connection{Image: target},
+			Domain: ch.Entry.Location,
+		}, time.Now()); v.Suppressed {
+			continue
+		}
 		// Persistence alerts anchor to no connection, so they dedupe on the
 		// entry itself: re-detecting the same autostart must not re-alert.
 		created, err := c.ledger.RecordAlert(ledger.Alert{

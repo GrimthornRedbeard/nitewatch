@@ -161,6 +161,18 @@ func extractIPs(line string, kind Kind) []string {
 	if kind == KindTorExitList && !strings.HasPrefix(line, "ExitAddress ") {
 		return nil
 	}
+	if kind == KindSuricataRule {
+		// Only the bracketed address list in the rule HEADER holds indicators.
+		// Scanning the whole line swept up addresses appearing in msg: text and
+		// reference URLs — an 8.8.8.8 in a documentation link would have become
+		// a critical indicator and flagged every DNS query the user makes.
+		open := strings.Index(line, "[")
+		close := strings.Index(line, "]")
+		if open < 0 || close < open {
+			return nil
+		}
+		line = line[open+1 : close]
+	}
 	var out []string
 	for _, cand := range ipv4Re.FindAllString(line, -1) {
 		ip := net.ParseIP(cand)

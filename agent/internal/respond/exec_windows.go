@@ -58,7 +58,7 @@ func (w *WindowsExecutor) kill(a Action) Result {
 	if pid == "" {
 		return Result{Message: "no process id"}
 	}
-	out, err := exec.Command("taskkill.exe", "/PID", pid, "/T", "/F").CombinedOutput()
+	out, err := exec.Command(system32("taskkill.exe"), "/PID", pid, "/T", "/F").CombinedOutput()
 	if err != nil {
 		return Result{Message: fmt.Sprintf("could not stop the program: %s", clean(out))}
 	}
@@ -77,7 +77,7 @@ func (w *WindowsExecutor) block(a Action) Result {
 	for _, dir := range []string{"out", "in"} {
 		args := []string{"advfirewall", "firewall", "add", "rule",
 			"name=" + name, "dir=" + dir, "action=block", "remoteip=" + ip}
-		if out, err := exec.Command("netsh.exe", args...).CombinedOutput(); err != nil {
+		if out, err := exec.Command(system32("netsh.exe"), args...).CombinedOutput(); err != nil {
 			return Result{Message: fmt.Sprintf("could not add the firewall rule: %s", clean(out))}
 		}
 	}
@@ -93,7 +93,7 @@ func (w *WindowsExecutor) unblock(undo map[string]string) Result {
 	if name == "" {
 		return Result{Message: "no rule recorded"}
 	}
-	if out, err := exec.Command("netsh.exe", "advfirewall", "firewall", "delete", "rule",
+	if out, err := exec.Command(system32("netsh.exe"), "advfirewall", "firewall", "delete", "rule",
 		"name="+name).CombinedOutput(); err != nil {
 		return Result{Message: fmt.Sprintf("could not remove the firewall rule: %s", clean(out))}
 	}
@@ -129,7 +129,7 @@ func (w *WindowsExecutor) quarantine(a Action) Result {
 		}
 	}
 	// Deny execution even from the quarantine folder.
-	_ = exec.Command("icacls.exe", dest, "/deny", "*S-1-1-0:(X)").Run()
+	_ = exec.Command(system32("icacls.exe"), dest, "/deny", "*S-1-1-0:(X)").Run()
 
 	return Result{
 		OK:      true,
@@ -143,7 +143,7 @@ func (w *WindowsExecutor) restore(undo map[string]string) Result {
 	if from == "" || to == "" {
 		return Result{Message: "no quarantine record"}
 	}
-	_ = exec.Command("icacls.exe", from, "/remove:d", "*S-1-1-0").Run()
+	_ = exec.Command(system32("icacls.exe"), from, "/remove:d", "*S-1-1-0").Run()
 	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 		return Result{Message: "could not recreate the original folder"}
 	}
@@ -251,4 +251,16 @@ func copyFile(src, dst string) error {
 
 func clean(out []byte) string {
 	return strings.Join(strings.Fields(string(out)), " ")
+}
+
+// system32 builds an absolute path under the real system directory. An elevated
+// process must never resolve helper binaries through %PATH% — a user-writable
+// directory on the path lets an unprivileged user plant netsh.exe or taskkill.exe
+// and have this agent run it as SYSTEM.
+func system32(name string) string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(root, "System32", name)
 }

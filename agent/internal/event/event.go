@@ -27,7 +27,7 @@ const (
 // JSON tags are load-bearing: the replay source and testdata fixtures serialize
 // to exactly these names.
 type NormalizedEvent struct {
-	Seq   uint64    `json:"seq"`   // monotonic within a run; assigned by the source
+	Seq   uint64    `json:"seq"` // monotonic within a run; assigned by the source
 	Kind  Kind      `json:"kind"`
 	Time  time.Time `json:"time"`
 	PID   uint32    `json:"pid"`

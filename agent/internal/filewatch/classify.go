@@ -98,13 +98,21 @@ func Classify(path string) Category {
 		base = p[i+1:]
 	}
 
-	for _, n := range ransomNoteNames {
-		if strings.Contains(base, n) {
-			return RansomNote
-		}
-	}
+	// Credential stores are recognised anywhere: their paths are specific.
 	if what, _ := CredentialInfo(path); what != "" {
 		return Credential
+	}
+
+	// A ransom note only counts INSIDE the folders ransomware targets. Matching
+	// "readme.txt" anywhere on disk made every source checkout and unzipped
+	// archive raise the loudest alert in the product — and since a note alone
+	// satisfied Confirmed, one file write was enough.
+	if inUserDir(p) {
+		for _, n := range ransomNoteNames {
+			if strings.Contains(base, n) {
+				return RansomNote
+			}
+		}
 	}
 	if !inUserDir(p) {
 		return Ignored

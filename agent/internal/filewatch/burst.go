@@ -42,6 +42,16 @@ type procState struct {
 	image   string
 	events  []fileEvent
 	updated time.Time
+	// summary is maintained incrementally. Recomputing it per event made
+	// Record O(n^2): measured 15s for 20k writes, all of it on the single
+	// ingest goroutine, so the network ledger stalls during an encryption
+	// sweep — losing the exfiltration evidence while counting file writes.
+	seen    map[string]int // path -> live event count; makes distinct-file accounting O(1)
+	dirs    map[string]int
+	files   int
+	renamed int
+	notes   int
+	sample  []string
 }
 
 type fileEvent struct {
@@ -70,7 +80,7 @@ func (t *Tracker) Record(pid uint32, image, path string, at time.Time) Burst {
 		if len(t.procs) >= t.maxTracked {
 			t.evictStaleLocked(at)
 		}
-		st = &procState{image: image}
+		st = &procState{image: image, seen: map[string]int{}, dirs: map[string]int{}}
 		t.procs[pid] = st
 	}
 	if st.image == "" {
@@ -78,54 +88,88 @@ func (t *Tracker) Record(pid uint32, image, path string, at time.Time) Burst {
 	}
 	st.updated = at
 
-	cat := Classify(path)
-	st.events = append(st.events, fileEvent{
+	ev := fileEvent{
 		path:    path,
 		at:      at,
 		renamed: EncryptedLookingExt(path),
-		note:    cat == RansomNote,
-	})
-
-	// Drop everything older than the window.
-	cutoff := at.Add(-t.window)
-	kept := st.events[:0]
-	for _, e := range st.events {
-		if e.at.After(cutoff) {
-			kept = append(kept, e)
-		}
+		note:    Classify(path) == RansomNote,
 	}
-	st.events = kept
+	st.add(ev)
 
-	return summarize(pid, st)
+	// Expire from the front; events arrive in time order.
+	cutoff := at.Add(-t.window)
+	drop := 0
+	for drop < len(st.events) && !st.events[drop].at.After(cutoff) {
+		st.remove(st.events[drop])
+		drop++
+	}
+	st.events = st.events[drop:]
+
+	// Bound per-process history so one sweep cannot grow without limit.
+	if over := len(st.events) - maxEventsPerProc; over > 0 {
+		for i := 0; i < over; i++ {
+			st.remove(st.events[i])
+		}
+		st.events = st.events[over:]
+	}
+
+	return st.summary(pid)
 }
 
-func summarize(pid uint32, st *procState) Burst {
-	b := Burst{PID: pid, Image: st.image}
-	seen := map[string]bool{}
-	dirs := map[string]bool{}
-	for _, e := range st.events {
-		if !seen[e.path] {
-			seen[e.path] = true
-			b.Files++
-			if len(b.Sample) < 5 {
-				b.Sample = append(b.Sample, e.path)
-			}
-		}
-		if e.renamed {
-			b.Renamed++
-		}
-		if e.note {
-			b.Notes++
-		}
-		dirs[dirOf(e.path)] = true
-		if b.Oldest.IsZero() || e.at.Before(b.Oldest) {
-			b.Oldest = e.at
-		}
-		if e.at.After(b.Newest) {
-			b.Newest = e.at
+// maxEventsPerProc caps retained events for one process. The window normally
+// bounds this, but an encryption sweep can write far faster than the window
+// expires; the thresholds are reached long before the cap, so nothing is lost.
+const maxEventsPerProc = 4096
+
+func (st *procState) add(e fileEvent) {
+	st.events = append(st.events, e)
+	if st.seen[e.path] == 0 {
+		st.files++
+		if len(st.sample) < 5 {
+			st.sample = append(st.sample, e.path)
 		}
 	}
-	b.Dirs = len(dirs)
+	st.seen[e.path]++
+	if e.renamed {
+		st.renamed++
+	}
+	if e.note {
+		st.notes++
+	}
+	st.dirs[dirOf(e.path)]++
+}
+
+func (st *procState) remove(e fileEvent) {
+	if e.renamed {
+		st.renamed--
+	}
+	if e.note {
+		st.notes--
+	}
+	if d := dirOf(e.path); st.dirs[d] > 1 {
+		st.dirs[d]--
+	} else {
+		delete(st.dirs, d)
+	}
+	// Distinct-file accounting by refcount: drop the path only when its last
+	// event ages out. Scanning the event slice here is what kept Record
+	// superlinear even after the summary was made incremental.
+	if n := st.seen[e.path]; n > 1 {
+		st.seen[e.path] = n - 1
+	} else if n == 1 {
+		delete(st.seen, e.path)
+		st.files--
+	}
+}
+
+func (st *procState) summary(pid uint32) Burst {
+	b := Burst{PID: pid, Image: st.image, Files: st.files,
+		Renamed: st.renamed, Notes: st.notes, Dirs: len(st.dirs)}
+	b.Sample = append(b.Sample, st.sample...)
+	if len(st.events) > 0 {
+		b.Oldest = st.events[0].at
+		b.Newest = st.events[len(st.events)-1].at
+	}
 	return b
 }
 
@@ -173,6 +217,9 @@ const (
 	// ConfirmedRenames: encryption-looking renames that, combined with volume,
 	// remove reasonable doubt.
 	ConfirmedRenames = 10
+	// NoteCorroboration: how many OTHER user files must have been touched
+	// alongside a ransom note before it counts as confirmation.
+	NoteCorroboration = 5
 )
 
 // Verdict grades a burst.
@@ -190,7 +237,12 @@ const (
 // Assess grades a burst without knowing anything about the process. Callers
 // layer trust (signature, publisher) on top.
 func Assess(b Burst) Verdict {
-	if b.Notes > 0 && b.Files > 0 {
+	// A ransom note CORROBORATES encryption; it does not prove it alone.
+	// Ransomware encrypts first and then leaves the note, so a note with no
+	// accompanying file activity is just a file that happens to be called
+	// readme. Requiring real activity alongside it keeps ordinary documents
+	// from raising the loudest alert in the product.
+	if b.Notes > 0 && b.Files-b.Notes >= NoteCorroboration {
 		return Confirmed
 	}
 	if b.Renamed >= ConfirmedRenames && b.Files >= ConfirmedRenames {

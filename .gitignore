@@ -21,3 +21,9 @@ node_modules/
 .idea/
 Thumbs.db
 .DS_Store
+nitewatch
+nitewatch.log
+nitewatch.db
+feeds/
+quarantine/
+ip2asn.tsv

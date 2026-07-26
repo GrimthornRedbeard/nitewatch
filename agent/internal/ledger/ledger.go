@@ -251,13 +251,20 @@ func (d *DB) StoryFor(id int64) (string, error) {
 	return story.String, nil
 }
 
-// IsNewDestination reports whether this (image, domain) pair has never been
-// recorded before — the "first time this program contacted this domain" signal.
-func (d *DB) IsNewDestination(image, domain string) bool {
+// IsNewDestination reports whether this program has reached this destination
+// before — the "first contact" signal that gates most of the noisier rules.
+//
+// dest may be a domain OR a bare address. Nameless connections store domain as
+// SQL NULL, so querying `domain = '203.0.113.9'` could never match one: every
+// raw-IP flow read as first contact forever, and the rules that gate on it
+// (raw-ip-no-dns, unsigned-outbound) refired on every ledger row. Matching the
+// address column as well is what makes that gate real.
+func (d *DB) IsNewDestination(image, dest string) bool {
 	var n int
 	err := d.sql.QueryRow(
-		`SELECT COUNT(*) FROM connections WHERE image = ? AND domain = ?`,
-		image, nullable(domain),
+		`SELECT COUNT(*) FROM connections
+		 WHERE image = ? AND (domain = ? OR (domain IS NULL AND remote_ip = ?))`,
+		image, nullable(dest), dest,
 	).Scan(&n)
 	if err != nil {
 		return false

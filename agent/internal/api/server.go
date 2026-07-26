@@ -132,7 +132,35 @@ func (s *Server) Handler() http.Handler {
 	if err == nil {
 		mux.Handle("/", http.FileServer(http.FS(sub)))
 	}
-	return mux
+	return requireLocalHost(mux)
+}
+
+// requireLocalHost rejects requests whose Host header is not our loopback
+// address.
+//
+// Binding 127.0.0.1 does not stop DNS rebinding: an attacker points
+// evil.tld at 127.0.0.1 with a short TTL, and the browser then treats
+// http://evil.tld:8973 as SAME-ORIGIN with the attacker's page — so CORS does
+// not apply and the whole ledger (every process, destination and causal story)
+// is readable. The Origin check on mutating routes does not help here, because
+// same-origin GETs send no Origin header at all. Validating Host is the fix.
+func requireLocalHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		switch host {
+		case "127.0.0.1", "localhost", "::1", "[::1]":
+			// Defence in depth for the one place attacker-influenced text is
+			// injected as HTML, and against content sniffing.
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+			next.ServeHTTP(w, r)
+		default:
+			http.Error(w, "requests must address this agent as 127.0.0.1", http.StatusForbidden)
+		}
+	})
 }
 
 // ListenAndServe binds the loopback address and serves until error.

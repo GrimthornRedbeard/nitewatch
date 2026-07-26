@@ -148,12 +148,21 @@ func TestRenamesConfirmEncryption(t *testing.T) {
 	}
 }
 
-// A ransom note alongside any file activity removes all doubt.
-func TestRansomNoteConfirmsImmediately(t *testing.T) {
+// A ransom note CORROBORATES encryption rather than proving it alone.
+//
+// This assertion was originally "a note plus any activity confirms", which is
+// what let a single saved readme.txt raise the loudest alert in the product.
+// Ransomware encrypts first and leaves the note after, so real corroborating
+// activity is required.
+func TestRansomNoteConfirmsAlongsideEncryptionActivity(t *testing.T) {
 	tr := NewTracker()
 	now := time.Now()
-	tr.Record(9, "evil.exe", `C:\Users\k\Documents\a.docx`, now)
-	b := tr.Record(9, "evil.exe", `C:\Users\k\Documents\HOW_TO_DECRYPT.txt`, now.Add(time.Second))
+	for i := 0; i < NoteCorroboration; i++ {
+		tr.Record(9, "evil.exe",
+			fmt.Sprintf(`C:\Users\k\Documents\d%d\a%d.docx`, i%3, i),
+			now.Add(time.Duration(i)*time.Second))
+	}
+	b := tr.Record(9, "evil.exe", `C:\Users\k\Documents\HOW_TO_DECRYPT.txt`, now.Add(10*time.Second))
 	if b.Notes != 1 {
 		t.Fatalf("notes = %d, want 1", b.Notes)
 	}
@@ -245,5 +254,45 @@ func TestEncryptionSweepWithoutANoteIsStillConfirmed(t *testing.T) {
 	}
 	if got := Assess(b); got != Confirmed {
 		t.Fatalf("a 45-file rename sweep should be Confirmed, got %v", got)
+	}
+}
+
+// Regression (QA sweep): "readme.txt" matched ransomNoteNames ANYWHERE on disk,
+// and a note alone satisfied Confirmed because the note counted toward Files.
+// Every source checkout and unzipped archive therefore raised the loudest alert
+// in the product, failing the quiet-machine budget on day one.
+func TestOrdinaryReadmeIsNotARansomNote(t *testing.T) {
+	for _, p := range []string{
+		`C:\code\myproject\README.txt`,
+		`C:\Program Files\App\readme.html`,
+		`C:\Users\k\AppData\Local\pkg\readme.txt`,
+	} {
+		if got := Classify(p); got == RansomNote {
+			t.Errorf("Classify(%s) = RansomNote — outside user folders it is just a file", p)
+		}
+	}
+	// Inside the folders ransomware targets it still counts.
+	if got := Classify(`C:\Users\k\Documents\HOW_TO_DECRYPT.txt`); got != RansomNote {
+		t.Errorf("a note in Documents should still be recognised, got %v", got)
+	}
+}
+
+func TestNoteAloneDoesNotConfirmRansomware(t *testing.T) {
+	tr := NewTracker()
+	now := time.Now()
+	// Saving one file called readme.txt in Documents, and nothing else.
+	b := tr.Record(9, "editor.exe", `C:\Users\k\Documents\readme.txt`, now)
+	if got := Assess(b); got == Confirmed {
+		t.Fatal("a lone note must not confirm an encryption sweep")
+	}
+
+	// A note ALONGSIDE real encryption activity still confirms.
+	for i := 0; i < NoteCorroboration+1; i++ {
+		b = tr.Record(9, "evil.exe",
+			fmt.Sprintf(`C:\Users\k\Documents\d%d\f%d.docx`, i%3, i), now.Add(time.Duration(i)*time.Second))
+	}
+	b = tr.Record(9, "evil.exe", `C:\Users\k\Documents\HOW_TO_DECRYPT.txt`, now.Add(time.Minute/2))
+	if got := Assess(b); got != Confirmed {
+		t.Fatalf("a note with corroborating activity should confirm, got %v", got)
 	}
 }

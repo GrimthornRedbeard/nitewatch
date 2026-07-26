@@ -155,3 +155,41 @@ func TestRecentConnectionsNewestFirst(t *testing.T) {
 		t.Fatalf("expected newest-first ordering, got %+v", rows)
 	}
 }
+
+// Regression (QA sweep): nameless connections store domain as SQL NULL, so a
+// lookup keyed on the IP could never match one. FirstContact was therefore
+// permanently true for every raw-IP flow, and the rules gated on it fired again
+// on every ledger row — a permanent high-severity alert storm from one
+// background agent polling a hardcoded address.
+func TestIsNewDestinationMatchesRawIPFlows(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "firstcontact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const image = `C:\App\agent.exe`
+	const ip = "203.0.113.9"
+
+	if !db.IsNewDestination(image, ip) {
+		t.Fatal("never-seen address should be first contact")
+	}
+	// A connection with NO name, exactly as the collector records one.
+	if err := db.RecordConnection(Connection{
+		Time: time.Now(), Image: image, RemoteIP: ip, RemotePort: 443, Proto: "TCP",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if db.IsNewDestination(image, ip) {
+		t.Fatal("after recording a nameless flow, the same address must NOT be first contact")
+	}
+	// Named destinations still work, and other programs are unaffected.
+	if !db.IsNewDestination(`C:\Other\other.exe`, ip) {
+		t.Error("a different program reaching the same address is still first contact")
+	}
+	_ = db.RecordConnection(Connection{Time: time.Now(), Image: image,
+		RemoteIP: "9.9.9.9", Domain: "named.test", Proto: "TCP"})
+	if db.IsNewDestination(image, "named.test") {
+		t.Error("named destinations must still be matched by name")
+	}
+}

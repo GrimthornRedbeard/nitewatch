@@ -15,6 +15,7 @@ package respond
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -153,6 +154,24 @@ func str(m map[string]any, k string) string {
 	v, ok := m[k]
 	if !ok || v == nil {
 		return ""
+	}
+	// Evidence round-trips through JSON in the ledger, so every number returns
+	// as float64. Formatting those with %v gives exponent notation above ~1e6
+	// ("1.234568e+06"), which taskkill rejects — silently breaking the one
+	// button that stops active ransomware on a long-uptime machine.
+	switch n := v.(type) {
+	case float64:
+		return strconv.FormatInt(int64(n), 10)
+	case float32:
+		return strconv.FormatInt(int64(n), 10)
+	case int:
+		return strconv.Itoa(n)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case uint32:
+		return strconv.FormatUint(uint64(n), 10)
+	case uint64:
+		return strconv.FormatUint(n, 10)
 	}
 	s := fmt.Sprintf("%v", v)
 	if s == "<nil>" {
