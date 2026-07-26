@@ -134,8 +134,15 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	// Start the dashboard first so it is reachable even if the sensor can't start.
 	var srv *api.Server
 	if serve {
+		quarantine := filepath.Join(baseDir(), "quarantine")
 		srv = api.New(led).WithSettings(cfg).
-			WithExecutor(respond.NewWindowsExecutor(filepath.Join(baseDir(), "quarantine")))
+			WithExecutor(respond.NewWindowsExecutor(quarantine), quarantine)
+		if tok, err := api.NewToken(baseDir()); err == nil {
+			srv = srv.WithToken(tok)
+			log.Printf("api: token required; stored at %s", tok.Path())
+		} else {
+			log.Printf("api: could not create an auth token (%v); the local API is unauthenticated", err)
+		}
 		log.Printf("dashboard: http://%s", srv.Addr())
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {

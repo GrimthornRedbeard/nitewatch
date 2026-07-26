@@ -96,3 +96,60 @@ func TestReversibilityIsReportedHonestly(t *testing.T) {
 		}
 	}
 }
+
+// Undo records are read back from the database and acted on with elevated
+// privileges. If that file is writable by an attacker — and it sits beside the
+// agent, potentially in a user-writable folder — unvalidated records are an
+// arbitrary file-move and registry-write primitive running as SYSTEM.
+func TestValidateUndoRejectsTamperedRecords(t *testing.T) {
+	const qdir = `C:\Agent\quarantine`
+
+	bad := []struct {
+		name string
+		kind Kind
+		undo map[string]string
+	}{
+		{"restore from outside quarantine", QuarantineFile,
+			map[string]string{"from": `C:\Users\k\evil.dll`, "to": `C:\Windows\System32\important.dll`}},
+		{"traversal out of quarantine", QuarantineFile,
+			map[string]string{"from": qdir + `\..\..\Windows\System32\x.dll`, "to": `C:\Windows\System32\x.dll`}},
+		{"registry write outside autostart", RemoveAutostart,
+			map[string]string{"kind": "registry", "location": `HKLM\SYSTEM\CurrentControlSet\Services\Evil`, "name": "ImagePath", "value": "evil.exe"}},
+		{"startup file from outside quarantine", RemoveAutostart,
+			map[string]string{"kind": "file", "from": `C:\Users\k\evil.lnk`, "to": `C:\Startup\evil.lnk`}},
+		{"firewall rule we never created", BlockAddress,
+			map[string]string{"rule": "Core Networking - DNS (UDP-Out)", "ip": "1.2.3.4"}},
+		{"firewall undo with junk address", BlockAddress,
+			map[string]string{"rule": "NiteWatch block x", "ip": "not-an-ip"}},
+	}
+	for _, c := range bad {
+		if err := ValidateUndo(c.kind, c.undo, qdir); err == nil {
+			t.Errorf("%s: tampered undo record was accepted", c.name)
+		}
+	}
+
+	good := []struct {
+		name string
+		kind Kind
+		undo map[string]string
+	}{
+		{"our own quarantine restore", QuarantineFile,
+			map[string]string{"from": qdir + `\20260726-x.exe.quarantined`, "to": `C:\Users\k\Downloads\x.exe`}},
+		{"our own run-key restore", RemoveAutostart,
+			map[string]string{"kind": "registry", "location": `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "name": "App", "value": `C:\App\a.exe`}},
+		{"our own firewall rule", BlockAddress,
+			map[string]string{"rule": "NiteWatch block 185.4.3.2", "ip": "185.4.3.2"}},
+	}
+	for _, c := range good {
+		if err := ValidateUndo(c.kind, c.undo, qdir); err != nil {
+			t.Errorf("%s: legitimate undo rejected: %v", c.name, err)
+		}
+	}
+}
+
+// Kill cannot be undone and must not pretend otherwise.
+func TestValidateUndoRejectsUnUndoableKinds(t *testing.T) {
+	if err := ValidateUndo(KillProcess, map[string]string{"pid": "1"}, `C:\q`); err == nil {
+		t.Fatal("killing a process is not reversible and must be refused")
+	}
+}

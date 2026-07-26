@@ -40,59 +40,55 @@ func NewSuppressor() *Suppressor {
 	}
 }
 
-// trustedSigners are publishers whose signed binaries do not warrant
-// low-severity behavioural alerts. Signature verification is the strong claim
-// here — this list only decides whose VERIFIED signature is boring.
+// trustedSigners are publisher common names whose VERIFIED signature makes
+// low-severity behavioural noise uninteresting.
 //
-// Deliberately conservative: a signed binary from one of these publishers can
-// still raise a Critical feed hit. Being signed by Microsoft does not make
-// contacting known malware infrastructure acceptable; it makes an unremarkable
-// first connection unremarkable.
-var trustedSigners = []string{
-	"microsoft",
-	"google",
-	"mozilla",
-	"apple",
-	"adobe",
-	"valve",
-	"nvidia",
-	"intel",
-	"amd",
-	"dell",
-	"hp inc",
-	"lenovo",
-	"logitech",
-	"discord",
-	"spotify",
-	"dropbox",
-	"slack technologies",
-	"zoom video communications",
-	"brave software",
-	"opera",
-	"vivaldi",
-	"jetbrains",
-	"oracle",
-	"steam",
-	"epic games",
-	"blizzard",
-	"riot games",
-	"1password",
-	"agilebits",
+// Matched EXACTLY, not by substring. Substring matching was a real hole: a
+// certificate legitimately issued to "Intelligent Systems Ltd" contains
+// "intel", "Googleplex Media" contains "google", and anyone can buy a code
+// signing certificate for a company they actually registered. Suppression is a
+// trust decision, so it may not be reachable by choosing a company name.
+var trustedSigners = map[string]bool{
+	"microsoft corporation":                              true,
+	"microsoft windows":                                  true,
+	"microsoft windows hardware compatibility publisher": true,
+	"google llc":                                         true,
+	"google inc":                                         true,
+	"mozilla corporation":                                true,
+	"apple inc.":                                         true,
+	"adobe inc.":                                         true,
+	"adobe systems incorporated":                         true,
+	"valve corp.":                                        true,
+	"valve corporation":                                  true,
+	"nvidia corporation":                                 true,
+	"intel corporation":                                  true,
+	"advanced micro devices, inc.":                       true,
+	"dell inc":                                           true,
+	"dell technologies inc.":                             true,
+	"hp inc.":                                            true,
+	"lenovo":                                             true,
+	"logitech inc":                                       true,
+	"discord inc.":                                       true,
+	"spotify ab":                                         true,
+	"dropbox, inc":                                       true,
+	"slack technologies, inc.":                           true,
+	"zoom video communications, inc.":                    true,
+	"brave software, inc.":                               true,
+	"opera norway as":                                    true,
+	"vivaldi technologies as":                            true,
+	"jetbrains s.r.o.":                                   true,
+	"oracle america, inc.":                               true,
+	"epic games, inc.":                                   true,
+	"blizzard entertainment, inc.":                       true,
+	"riot games, inc.":                                   true,
+	"agilebits inc.":                                     true,
 }
 
 // TrustedSigner reports whether a verified signature belongs to a publisher
-// whose ordinary behaviour is uninteresting.
+// whose ordinary behaviour is uninteresting. Comparison is exact after
+// normalising case and whitespace.
 func TrustedSigner(signer string) bool {
-	if signer == "" {
-		return false
-	}
-	s := strings.ToLower(signer)
-	for _, t := range trustedSigners {
-		if strings.Contains(s, t) {
-			return true
-		}
-	}
-	return false
+	return trustedSigners[strings.ToLower(strings.Join(strings.Fields(signer), " "))]
 }
 
 // Key identifies what a user is allowing: this rule, for this program, to this

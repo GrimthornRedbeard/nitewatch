@@ -203,8 +203,12 @@
 
   // Mutating endpoints require this header; it is what stops another site's
   // page from telling this agent to kill a process.
-  const NW = {"X-NiteWatch": "1"};
+  // The agent substitutes the real token when serving this page, so it never
+  // travels in a URL where it would reach browser history or a Referer header.
+  const TOKEN = "__NITEWATCH_TOKEN__";
+  const NW = {"X-NiteWatch": "1", "X-NiteWatch-Token": TOKEN};
   const post = (url) => fetch(url, {method: "POST", headers: NW});
+  const get = (url) => fetch(url, {headers: {"X-NiteWatch-Token": TOKEN}});
 
   function shortImage(p) {
     if (!p) return "(unknown)";
@@ -322,7 +326,7 @@
   });
   async function loadSettings() {
     try {
-      const v = await (await fetch("/api/settings")).json();
+      const v = await (await get("/api/settings")).json();
       $("s-local").checked = !!v.includeLocal;
       $("s-resolve").checked = !!v.resolveNames;
       $("s-recon").checked = !!v.recon;
@@ -386,7 +390,7 @@
 
   async function refreshStatus() {
     try {
-      const st = await (await fetch("/api/status")).json();
+      const st = await (await get("/api/status")).json();
       const b = $("banner");
       if (st.running) { b.className = "banner"; return; }
       b.className = "banner show";
@@ -414,7 +418,7 @@
   }
   async function refreshAlerts() {
     try {
-      const list = await (await fetch("/api/alerts?limit=50")).json() || [];
+      const list = await (await get("/api/alerts?limit=50")).json() || [];
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
       box.innerHTML = open.map(alertHTML).join("");
@@ -439,7 +443,7 @@
   // offering none.
   async function loadActions(a) {
     try {
-      const r = await (await fetch("/api/actions?alert=" + encodeURIComponent(a.id))).json();
+      const r = await (await get("/api/actions?alert=" + encodeURIComponent(a.id))).json();
       if (!r.available || !(r.actions || []).length) return;
       const box = $("acts-" + a.id);
       if (!box || box.dataset.loaded) return;
@@ -480,7 +484,7 @@
   async function refresh() {
     refreshAlerts();
     try {
-      const r = await fetch("/api/connections?limit=1000");
+      const r = await get("/api/connections?limit=1000");
       all = await r.json() || [];
       render();
     } catch (e) { /* keep last view on transient error */ }

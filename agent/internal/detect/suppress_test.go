@@ -141,12 +141,21 @@ func TestSuppressionAlwaysExplainsItself(t *testing.T) {
 }
 
 func TestTrustedSignerMatching(t *testing.T) {
-	for _, s := range []string{"Microsoft Windows", "Microsoft Corporation", "Google LLC", "Valve Corp."} {
+	for _, s := range []string{"Microsoft Windows", "Microsoft Corporation", "Google LLC", "Valve Corp.", "  google   llc  "} {
 		if !TrustedSigner(s) {
 			t.Errorf("%q should be recognised as trusted", s)
 		}
 	}
-	for _, s := range []string{"", "Totally Legit Software Inc", "Micr0soft"} {
+	// Substring matching would let anyone reach the trust list by registering a
+	// company whose name CONTAINS a trusted one, then buying a certificate for
+	// it legitimately.
+	for _, s := range []string{
+		"", "Totally Legit Software Inc", "Micr0soft",
+		"Intelligent Systems Ltd", // contains "intel"
+		"Googleplex Media LLC",    // contains "google"
+		"Microsoft Corporation Evil Branch",
+		"Not Microsoft Corporation",
+	} {
 		if TrustedSigner(s) {
 			t.Errorf("%q must not be treated as trusted", s)
 		}

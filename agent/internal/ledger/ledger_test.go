@@ -193,3 +193,61 @@ func TestIsNewDestinationMatchesRawIPFlows(t *testing.T) {
 		t.Error("named destinations must still be matched by name")
 	}
 }
+
+// The retention setting was clamped, persisted and then ignored — the ledger
+// grew forever while the dashboard claimed otherwise.
+func TestPruneEnforcesRetention(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "prune.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	_ = db.RecordConnection(Connection{Time: now.Add(-100 * 24 * time.Hour), Image: "old.exe", RemoteIP: "1.1.1.1"})
+	_ = db.RecordConnection(Connection{Time: now.Add(-2 * 24 * time.Hour), Image: "recent.exe", RemoteIP: "2.2.2.2"})
+
+	n, err := db.Prune(90*24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("pruned %d rows, want 1", n)
+	}
+	rows, _ := db.RecentConnections(10)
+	if len(rows) != 1 || rows[0].Image != "recent.exe" {
+		t.Fatalf("wrong row survived: %+v", rows)
+	}
+}
+
+// An unread warning is exactly what a user needs to find later, so it must
+// survive retention even when the connections behind it do not.
+func TestPruneKeepsUnacknowledgedAlerts(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "prunealerts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	ancient := now.Add(-3650 * 24 * time.Hour)
+	_, _ = db.RecordAlert(Alert{Time: ancient, RuleID: "unread", Area: "c2",
+		Severity: "critical", Title: "t", Narrative: "n", ConnID: 1})
+	_, _ = db.RecordAlert(Alert{Time: ancient, RuleID: "seen", Area: "c2",
+		Severity: "low", Title: "t", Narrative: "n", ConnID: 2})
+
+	all, _ := db.RecentAlerts(10)
+	for _, a := range all {
+		if a.RuleID == "seen" {
+			_ = db.AckAlert(a.ID)
+		}
+	}
+	if _, err := db.Prune(30*24*time.Hour, now); err != nil {
+		t.Fatal(err)
+	}
+
+	after, _ := db.RecentAlerts(10)
+	if len(after) != 1 || after[0].RuleID != "unread" {
+		t.Fatalf("the unacknowledged alert must survive; got %+v", after)
+	}
+}

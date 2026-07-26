@@ -27,11 +27,13 @@ var dashboardFS embed.FS
 const DefaultAddr = "127.0.0.1:8973"
 
 type Server struct {
-	ledger   *ledger.DB
-	settings *settings.Store
-	suppress *detect.Suppressor
-	exec     respond.Executor
-	addr     string
+	ledger        *ledger.DB
+	settings      *settings.Store
+	suppress      *detect.Suppressor
+	exec          respond.Executor
+	quarantineDir string
+	token         *Token
+	addr          string
 
 	mu     sync.RWMutex
 	status Status
@@ -56,11 +58,18 @@ func (s *Server) WithSuppressor(sup *detect.Suppressor) *Server {
 	return s
 }
 
+// WithToken requires callers to present a token on every API route.
+func (s *Server) WithToken(t *Token) *Server {
+	s.token = t
+	return s
+}
+
 // WithExecutor enables one-click remediation. Without it the dashboard shows
 // alerts and playbook text only — which is a complete, useful product, so this
 // stays optional rather than required.
-func (s *Server) WithExecutor(e respond.Executor) *Server {
+func (s *Server) WithExecutor(e respond.Executor, quarantineDir string) *Server {
 	s.exec = e
+	s.quarantineDir = quarantineDir
 	return s
 }
 
@@ -130,9 +139,16 @@ func (s *Server) Handler() http.Handler {
 	// "dashboard" dir, so strip it to a clean file server.
 	sub, err := fs.Sub(dashboardFS, "dashboard")
 	if err == nil {
-		mux.Handle("/", http.FileServer(http.FS(sub)))
+		mux.Handle("/", s.dashboardHandler(http.FileServer(http.FS(sub))))
 	}
-	return requireLocalHost(mux)
+
+	// Token check wraps every /api route; the dashboard shell is served
+	// separately above because it carries no data and must load to bootstrap.
+	api := http.NewServeMux()
+	api.Handle("/api/", s.requireToken(mux))
+	api.Handle("/", mux)
+
+	return requireLocalHost(api)
 }
 
 // requireLocalHost rejects requests whose Host header is not our loopback
@@ -506,11 +522,37 @@ func (s *Server) handleUndoAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "that action cannot be undone", http.StatusBadRequest)
 		return
 	}
+	// Undo records come back from the database, which may be user-writable.
+	// Validate structurally before acting on them with elevated privileges.
+	if err := respond.ValidateUndo(respond.Kind(rec.Kind), rec.Undo, s.quarantineDir); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	res := s.exec.Undo(respond.Action{Kind: respond.Kind(rec.Kind), Params: rec.Params}, rec.Undo)
 	if res.OK {
 		_ = s.ledger.MarkUndone(id)
 	}
 	writeJSON(w, map[string]any{"ok": res.OK, "message": res.Message})
+}
+
+// dashboardHandler serves the shell with the API token injected, so the page
+// can authenticate without the token ever appearing in a URL (where it would
+// land in browser history and Referer headers).
+func (s *Server) dashboardHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		page, err := dashboardFS.ReadFile("dashboard/index.html")
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		body := strings.Replace(string(page), "__NITEWATCH_TOKEN__", s.token.Value(), 1)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(body))
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

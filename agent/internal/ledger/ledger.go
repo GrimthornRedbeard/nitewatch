@@ -185,6 +185,39 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	return out, rows.Err()
 }
 
+// Prune deletes history older than the retention window.
+//
+// This exists because the dashboard exposed a "keep history for N days"
+// setting that nothing enforced: it was clamped, persisted, and then ignored
+// while the ledger grew forever. A visible control that does nothing is worse
+// than no control — the user believes their data is being aged out.
+//
+// Alerts and the action audit log are deliberately kept LONGER than
+// connections: they are the record of what this software told someone and what
+// it did to their machine, and that record is the product's accountability.
+func (d *DB) Prune(retention time.Duration, now time.Time) (int64, error) {
+	if retention <= 0 {
+		return 0, nil
+	}
+	cutoff := formatTS(now.Add(-retention))
+
+	res, err := d.sql.Exec(`DELETE FROM connections WHERE last_seen < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+
+	// Acknowledged alerts age out at four times the connection retention;
+	// unacknowledged ones are never deleted, because an unread warning is
+	// exactly the thing a user needs to find later.
+	alertCutoff := formatTS(now.Add(-4 * retention))
+	if _, err := d.sql.Exec(
+		`DELETE FROM alerts WHERE status = 'acknowledged' AND ts < ?`, alertCutoff); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
 // UnnamedIPs returns distinct remote addresses among recent rows that still
 // have no name, so a background pass can try to resolve them.
 func (d *DB) UnnamedIPs(limit int) ([]string, error) {

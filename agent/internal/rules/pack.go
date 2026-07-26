@@ -1,10 +1,21 @@
 // Package rules loads detection rule packs.
 //
 // Rules are DATA, not code: a pack is YAML carrying a detector name, severity,
-// and the hand-written narrative and playbook shown to the user. That keeps
-// detection updates independent of agent releases, and keeps the advisory text
-// deterministic — there is no model in the alert path, because wrong security
-// advice delivered confidently is worse than no advice.
+// and the hand-written narrative and playbook shown to the user. The advisory
+// text is therefore deterministic — there is no model in the alert path,
+// because wrong security advice delivered confidently is worse than no advice.
+//
+// NOT YET IMPLEMENTED, despite what the design doc anticipates:
+//   - Packs are NOT signed. Shipped packs are embedded in the binary and so
+//     inherit whatever integrity the executable has, but --rules loads
+//     unsigned YAML from disk and is a development affordance, not a supported
+//     update channel. Signature verification must land before packs are
+//     distributed separately.
+//   - Packs are NOT hot-loaded. They are read once at startup; changing a file
+//     requires a restart.
+//
+// Both are recorded in docs/plans/ rather than implied here, because a comment
+// describing a security property the code does not have is worse than silence.
 package rules
 
 import (

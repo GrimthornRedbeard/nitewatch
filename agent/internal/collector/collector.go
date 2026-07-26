@@ -127,6 +127,7 @@ func (c *Collector) Run(ctx context.Context) error {
 		return err
 	}
 	go c.backfillNames(ctx)
+	go c.pruneLoop(ctx)
 	if c.opts.Detect != nil {
 		go c.watchAutostart(ctx)
 	}
@@ -299,6 +300,33 @@ func domainOrIP(domain, ip string) string {
 		return domain
 	}
 	return ip
+}
+
+// pruneLoop enforces the retention setting. Runs hourly: retention is measured
+// in days, so precision costs nothing and frequent large DELETEs would compete
+// with ingestion for the database.
+func (c *Collector) pruneLoop(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			days := c.config().RetentionDays
+			if days <= 0 {
+				continue
+			}
+			n, err := c.ledger.Prune(time.Duration(days)*24*time.Hour, now)
+			if err != nil {
+				log.Printf("retention: prune failed: %v", err)
+				continue
+			}
+			if n > 0 {
+				log.Printf("retention: removed %d connections older than %d days", n, days)
+			}
+		}
+	}
 }
 
 // config returns the effective settings, preferring the live store.

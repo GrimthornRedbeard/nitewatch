@@ -73,7 +73,7 @@ func (w *WindowsExecutor) block(a Action) Result {
 	if ip == "" {
 		return Result{Message: "no address"}
 	}
-	name := ruleName(ip)
+	name := ruleNameFor(ip)
 	for _, dir := range []string{"out", "in"} {
 		args := []string{"advfirewall", "firewall", "add", "rule",
 			"name=" + name, "dir=" + dir, "action=block", "remoteip=" + ip}
@@ -99,8 +99,6 @@ func (w *WindowsExecutor) unblock(undo map[string]string) Result {
 	}
 	return Result{OK: true, Message: fmt.Sprintf("Unblocked %s.", undo["ip"])}
 }
-
-func ruleName(ip string) string { return "NiteWatch block " + ip }
 
 // quarantine moves a file where it cannot run and strips execute permission.
 // The original path is recorded so restore puts it back exactly.

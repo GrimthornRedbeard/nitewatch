@@ -14,6 +14,7 @@ package respond
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -178,4 +179,133 @@ func str(m map[string]any, k string) string {
 		return ""
 	}
 	return strings.TrimSpace(s)
+}
+
+// ValidateUndo checks that an undo record describes a reversal we are willing
+// to perform.
+//
+// SECURITY: undo records are read back from the ledger database and then acted
+// on with the agent's (elevated) privileges. If an attacker can write that
+// file — and it lives beside the agent, which may be a user-writable folder —
+// then unvalidated records are an arbitrary file-move and registry-write
+// primitive running as SYSTEM. Structural validation is used rather than
+// signing because it needs no secret and survives a database that is restored,
+// copied or edited: we simply refuse to reverse anything that does not look
+// like something we could have done.
+func ValidateUndo(kind Kind, undo map[string]string, quarantineDir string) error {
+	switch kind {
+	case BlockAddress:
+		rule, ip := undo["rule"], undo["ip"]
+		if ip == "" || net.ParseIP(ip) == nil {
+			return fmt.Errorf("undo record does not name a valid address")
+		}
+		// The rule name must be one WE generate, so this cannot be used to
+		// delete arbitrary firewall rules (a domain-policy rule, say).
+		if rule != ruleNameFor(ip) {
+			return fmt.Errorf("undo record does not name a NiteWatch firewall rule")
+		}
+		return nil
+
+	case QuarantineFile:
+		from, to := undo["from"], undo["to"]
+		if from == "" || to == "" {
+			return fmt.Errorf("undo record is incomplete")
+		}
+		// The source must be inside our own quarantine directory: otherwise
+		// this becomes "move any file anywhere", as SYSTEM.
+		if !underDir(from, quarantineDir) {
+			return fmt.Errorf("refusing to restore from outside the quarantine folder")
+		}
+		if _, ok := normWin(to); !ok {
+			return fmt.Errorf("undo record has an unsafe destination")
+		}
+		return nil
+
+	case RemoveAutostart:
+		switch undo["kind"] {
+		case "file":
+			if !underDir(undo["from"], quarantineDir) {
+				return fmt.Errorf("refusing to restore from outside the quarantine folder")
+			}
+			return nil
+		case "registry":
+			// Only autostart locations may be written back, so a tampered
+			// record cannot install a service or rewrite an unrelated key.
+			if !knownAutostartKey(undo["location"]) {
+				return fmt.Errorf("refusing to write outside known startup locations")
+			}
+			if undo["name"] == "" {
+				return fmt.Errorf("undo record has no value name")
+			}
+			return nil
+		}
+		return fmt.Errorf("unrecognised undo record")
+	}
+	return fmt.Errorf("this action cannot be undone")
+}
+
+// ruleNameFor must match the executor's naming exactly; it is the check that
+// keeps undo from deleting firewall rules we did not create.
+func ruleNameFor(ip string) string { return "NiteWatch block " + ip }
+
+// autostartKeyPrefixes are the only registry locations an undo may write.
+var autostartKeyPrefixes = []string{
+	`hkcu\software\microsoft\windows\currentversion\run`,
+	`hklm\software\microsoft\windows\currentversion\run`,
+	`hkcu\software\microsoft\windows\currentversion\runonce`,
+	`hklm\software\microsoft\windows\currentversion\runonce`,
+	`hklm\software\wow6432node\microsoft\windows\currentversion\run`,
+	`hklm\software\microsoft\windows nt\currentversion\winlogon`,
+	`hklm\software\microsoft\windows nt\currentversion\windows`,
+	`hklm\software\microsoft\windows nt\currentversion\image file execution options`,
+}
+
+func knownAutostartKey(loc string) bool {
+	l := strings.ToLower(strings.TrimSpace(loc))
+	for _, p := range autostartKeyPrefixes {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// underDir reports whether path sits inside dir.
+//
+// Deliberately does NOT use path/filepath: these are always Windows paths, and
+// the checks must behave identically wherever they run — including in tests on
+// Linux, where filepath treats a backslash as an ordinary character and would
+// silently accept a traversal.
+func underDir(path, dir string) bool {
+	if path == "" || dir == "" {
+		return false
+	}
+	p, ok := normWin(path)
+	if !ok {
+		return false // contains traversal
+	}
+	d, _ := normWin(dir)
+	if d == "" {
+		return false
+	}
+	if !strings.HasSuffix(d, `\`) {
+		d += `\`
+	}
+	return strings.HasPrefix(p, d)
+}
+
+// normWin lower-cases, collapses separators, and reports whether the path is
+// free of ".." components. Rejecting traversal outright is safer than trying to
+// resolve it, since the target need not exist yet.
+func normWin(p string) (string, bool) {
+	p = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), "/", `\`))
+	for strings.Contains(p, `\\`) {
+		p = strings.ReplaceAll(p, `\\`, `\`)
+	}
+	for _, seg := range strings.Split(p, `\`) {
+		if seg == ".." {
+			return p, false
+		}
+	}
+	return p, true
 }

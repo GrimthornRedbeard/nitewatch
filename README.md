@@ -2,29 +2,47 @@
 
 **Somebody's knocking on your door at 3am. Here's who.**
 
-NiteWatch is a lightweight personal security agent for Windows. It watches what your
-computer is actually doing — which programs are running, who they're talking to, what
-files they're touching — and when something is wrong, it tells you the story in plain
-English with a one-click fix.
+NiteWatch is a lightweight personal security agent for Windows. It watches what
+your computer is actually doing — which programs are running, who they're
+talking to, what files they're touching — and when something is wrong, it tells
+you the story in plain English with a one-click fix.
 
-- **Who's talking?** A permanent, process-attributed log of every outbound connection:
-  which program, which server, which domain, when.
-- **The whole story.** Alerts show the causal chain, not a jargon blob: "downloaded
-  ZIP → extracted EXE → spawned PowerShell → contacted a server flagged for malware
-  control."
-- **Do this.** Every alert comes with a pre-built fix: kill it, block it, quarantine
-  it, undo what it changed — one click, with undo.
-- **Private by design.** Everything is analyzed on your machine. Threat intelligence
-  is pulled *down*; your data never goes *up*.
+- **Who's talking?** A permanent, process-attributed log of every outbound
+  connection: which program, which server, which domain, when — plus who owns
+  the address block and what country it's registered in.
+- **The whole story.** Click any connection to see the causal chain that
+  produced it: *program started → looked up a name → connected*. Reconstructed
+  from a causal event graph, ordered by logical clock rather than wall time.
+- **Do this.** Alerts come with plain-English explanations and one-click
+  remediation — block, stop, quarantine, remove from startup — each with undo
+  where the change can be reversed.
+- **Private by design.** Everything is analysed on your machine. Threat
+  intelligence and address-ownership data are pulled *down*; nothing about your
+  traffic goes *up*.
+
+## What it detects
+
+| Area | Examples |
+|---|---|
+| **Command & control** | connections to known malware infrastructure, programs dialling bare addresses they never looked up, unsigned software reaching new destinations, first contact with watched jurisdictions |
+| **Persistence** | autostart entries added from temporary folders, an existing startup entry silently repointed, launch hijacking (IFEO/AppInit) |
+| **Ransomware** | one program rewriting many documents across folders, encryption-style renames, ransom notes, backup destruction |
+| **Credential theft** | a program that isn't the owner reading saved passwords, SSH keys, cloud credentials or wallet files |
+
+Noise control is treated as a feature, not a detail: verified-publisher
+suppression, a post-install learning window, per-program/destination "always
+allow", and severity gating so only serious findings interrupt you.
 
 ## Status
 
-**P1 "Flight Recorder" implemented** (2026-07-25) — the causally-enriched,
-process-attributed connection ledger + "Who's talking?" dashboard. Detections,
-alerts, and response actions come in P2+.
+Feature complete against the original design; **not yet validated on real
+hardware over time.** The false-positive rate during ordinary use is the open
+question.
 
 - Design: [docs/plans/2026-07-24-nitewatch-design.md](docs/plans/2026-07-24-nitewatch-design.md)
-- P1 plan + status: [docs/plans/2026-07-25-p1-flight-recorder.md](docs/plans/2026-07-25-p1-flight-recorder.md)
+- Phase plans: [P1](docs/plans/2026-07-25-p1-flight-recorder.md) · [P2](docs/plans/2026-07-25-p2-detections.md)
+- Feed licensing (read before adding a source): [docs/feed-licensing.md](docs/feed-licensing.md)
+- Known limitations: [docs/known-limitations.md](docs/known-limitations.md)
 
 ## Running it
 
@@ -34,29 +52,46 @@ Build (pure-Go, single static exe, no CGO):
 cd agent && CGO_ENABLED=0 go build -o nitewatch ./cmd/nitewatch
 ```
 
-**Dev/demo (any OS)** — replay a recorded trace and serve the dashboard:
-
-```bash
-./nitewatch --replay testdata/traces/basic.jsonl --serve
-```
-
-Then open <http://127.0.0.1:8973>.
-
-**Windows (live)** — run the built `nitewatch.exe` **elevated**:
+**Windows (live)** — must run **elevated**; ETW requires Administrator:
 
 ```
 nitewatch.exe --serve
 ```
 
-ETW requires Administrator. On non-Windows the live source is unavailable — use
-`--replay`. See [agent/internal/source/README.md](agent/internal/source/README.md)
-for the Windows-VM smoke test.
+Then open <http://127.0.0.1:8973>.
 
-## Layout (planned)
+**Dev/demo (any OS)** — replay a recorded trace, no elevation needed:
+
+```bash
+./nitewatch --replay testdata/traces/basic.jsonl
+```
+
+Useful flags: `--no-feeds` (skip threat-intel downloads), `--no-recon` (skip the
+address-ownership dataset), `--rules <dir>` (load rule packs from disk during
+development). Everything else is configured from the dashboard's Settings panel.
+
+## Layout
 
 ```
-agent/        Go agent: ETW sensors, causal graph (GoRapide), rule engine, ledger
-dashboard/    SvelteKit localhost UI: Who's Talking, alerts, allowlists
-rules/        Signed detection rule packs (JSON/YAML)
-docs/plans/   Design documents and implementation plans
+agent/
+  cmd/nitewatch/     entrypoint and run modes
+  internal/
+    source/          telemetry: Windows ETW, and a JSONL replay source for tests
+    event/           the source-agnostic event vocabulary
+    graph/           causal event graph (GoRapide poset) + rolling window
+    ledger/          SQLite flight recorder: connections, alerts, actions
+    detect/          detection engine, detectors, suppression gates
+    filewatch/       file classification and encryption-burst tracking
+    autostart/       autostart snapshot + diff
+    intel/           threat-intel feeds, matched offline
+    recon/           offline address ownership (ASN, country)
+    respond/         remediation actions and undo
+    notify/          notification gating and Windows toasts
+    api/             loopback HTTP + embedded dashboard
+  rules/             shipped detection rule packs (YAML), embedded in the binary
+  testdata/traces/   replay fixtures
 ```
+
+## Third-party data
+
+See [NOTICE](NOTICE) for required attributions.
