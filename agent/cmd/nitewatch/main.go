@@ -29,6 +29,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/collector"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/platform"
+	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/source"
 )
 
@@ -52,6 +53,7 @@ func main() {
 		dbPath       = flag.String("db", filepath.Join(baseDir(), "nitewatch.db"), "path to the connection ledger database")
 		includeLocal = flag.Bool("include-local", false, "also record loopback/private/link-local destinations (noisy)")
 		noResolve    = flag.Bool("no-resolve", false, "disable reverse-DNS lookup of destinations")
+		noRecon      = flag.Bool("no-recon", false, "disable the offline IP-ownership dataset (no download)")
 	)
 	flag.Parse()
 
@@ -77,6 +79,9 @@ func main() {
 		IncludeLocal: *includeLocal,
 		ResolveNames: !*noResolve,
 		ImageLookup:  platform.ProcessImage,
+	}
+	if !*noRecon {
+		opts.Recon = startRecon()
 	}
 	if err := run(*replayPath, *serve, *open, *dbPath, opts); err != nil {
 		log.Printf("fatal: %v", err)
@@ -164,6 +169,25 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 		return err
 	}
 	return nil
+}
+
+// startRecon loads the offline address-ownership dataset in the background.
+// It is enrichment, not a dependency: the agent records connections normally
+// while the dataset downloads, and rows written before it is ready get their
+// ownership filled in as they see further activity.
+func startRecon() *recon.DB {
+	db := recon.New()
+	cache := filepath.Join(baseDir(), "ip2asn.tsv")
+	go func() {
+		ctx := context.Background()
+		if err := db.EnsureLoaded(ctx, cache); err != nil {
+			log.Printf("recon: ownership data unavailable (%v); connections will show no owner/country", err)
+			return
+		}
+		log.Printf("recon: address-ownership dataset ready (%s)", cache)
+		db.RefreshLoop(ctx, cache)
+	}()
+	return db
 }
 
 func pickSource(replayPath string) (source.EventSource, error) {

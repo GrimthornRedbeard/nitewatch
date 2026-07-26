@@ -10,7 +10,10 @@ CREATE TABLE IF NOT EXISTS connections (
 	proto       TEXT NOT NULL,
 	domain      TEXT,
 	verdict     TEXT NOT NULL DEFAULT 'clean',
-	inbound     INTEGER NOT NULL DEFAULT 0
+	inbound     INTEGER NOT NULL DEFAULT 0,
+	asn         INTEGER NOT NULL DEFAULT 0,
+	as_org      TEXT,
+	country     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_conn_ts ON connections(ts);
 CREATE INDEX IF NOT EXISTS idx_conn_image_domain ON connections(image, domain);

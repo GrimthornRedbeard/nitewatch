@@ -10,6 +10,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/graph"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/resolve"
 	"github.com/threattape/nitewatch/agent/internal/source"
 )
@@ -23,6 +24,9 @@ type Options struct {
 	// ResolveNames enables reverse-DNS fallback for destinations the passive DNS
 	// join didn't name.
 	ResolveNames bool
+	// Recon supplies offline address ownership (AS owner / country). Optional:
+	// when nil, rows simply carry no ownership data.
+	Recon *recon.DB
 	// ImageLookup resolves a PID to an image path for processes the graph never
 	// saw start (i.e. everything already running when the agent launched).
 	// Injected so the collector stays platform-agnostic and testable.
@@ -119,6 +123,11 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		domain = c.resolver.Lookup(peerIP)
 	}
 
+	var info recon.Info
+	if c.opts.Recon != nil {
+		info = c.opts.Recon.Lookup(peerIP)
+	}
+
 	image := e.Image
 	if image == "" {
 		image = c.window.Current().ImageFor(e.PID)
@@ -136,6 +145,9 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		Proto:      e.Proto,
 		Domain:     domain,
 		Inbound:    inbound,
+		ASN:        info.ASN,
+		ASOrg:      info.Org,
+		Country:    info.Country,
 	}, c.opts.DedupWindow)
 }
 

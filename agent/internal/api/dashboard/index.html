@@ -23,6 +23,8 @@
   .card .n { font-size: 24px; font-weight: 600; }
   .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
   .controls { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  select { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; color: var(--fg); font-size: 13px; }
   input[type=search] { flex: 1 1 320px; padding: 10px 12px; background: var(--panel);
     border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-size: 14px; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -30,6 +32,11 @@
     font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
   .seg button:last-child { border-right: 0; }
   .seg button.on { background: var(--accent); color: #05121f; font-weight: 600; }
+  .flag { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 11px;
+    font-weight: 600; letter-spacing: .3px; background: #3a1c1c; color: #ff8f8f;
+    border: 1px solid #6a2a2a; margin-left: 6px; }
+  td.owner { color: var(--fg); }
+  td.cc { font-variant: small-caps; letter-spacing: .5px; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   table { width: 100%; border-collapse: collapse; background: var(--panel);
     border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -66,10 +73,15 @@
       <button data-v="4">IPv4</button>
       <button data-v="6">IPv6</button>
     </div>
+    <select id="ccfilter" title="Filter by country of the address block">
+      <option value="all">All countries</option>
+    </select>
   </div>
   <table>
     <thead><tr>
       <th>Last seen</th><th>Process</th><th>Destination</th><th>IP:Port</th>
+      <th title="Who owns the address block (autonomous system)">Owner</th>
+      <th title="Country the address block is registered to">Country</th>
       <th>Proto</th><th title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
       <th title="Network events collapsed into this connection">Activity</th>
     </tr></thead>
@@ -100,11 +112,35 @@
     return isNaN(d) ? t : d.toLocaleString();
   }
   let ipFilter = "all";
+  let ccFilter = "all";
+
+  // Cloud/CDN networks host everyone's traffic, so "the owner isn't the app's
+  // own company" is normal there and says nothing. Outside them, a program
+  // talking to a network unrelated to its vendor is worth a second look.
+  const SHARED_HOSTING = /CLOUDFLARE|AMAZON|AWS|GOOGLE|AKAMAI|FASTLY|MICROSOFT|AZURE|DIGITALOCEAN|LINODE|HETZNER|OVH|CLOUDFRONT/i;
+
+  // Very rough: does the owner or hostname look related to the program name?
+  function looksRelated(c) {
+    const proc = (shortImage(c.image) || "").replace(/\.exe$/i, "").toLowerCase();
+    if (proc.length < 4) return true; // too short to match on meaningfully
+    const hay = ((c.asOrg || "") + " " + (c.domain || "")).toLowerCase();
+    return hay.includes(proc);
+  }
+
+  // Flags a row when the address block owner is neither shared hosting nor
+  // plausibly the program's own vendor. This is a HINT, not a verdict.
+  function mismatchFlag(c) {
+    if (!c.asOrg) return "";
+    if (SHARED_HOSTING.test(c.asOrg)) return "";
+    if (looksRelated(c)) return "";
+    return ` <span class="flag" title="${esc(shortImage(c.image))} is talking to a network owned by ${esc(c.asOrg)}, which is not shared cloud hosting and does not look related to the program. Worth a look — not necessarily bad.">3rd-party</span>`;
+  }
 
   function visible() {
     const q = $("filter").value.toLowerCase();
     return all.filter(c => {
       if (ipFilter !== "all" && String(c.ipVersion) !== ipFilter) return false;
+      if (ccFilter !== "all" && (c.country || "") !== ccFilter) return false;
       if (!q) return true;
       return (c.image && c.image.toLowerCase().includes(q)) ||
              (c.domain && c.domain.toLowerCase().includes(q)) ||
@@ -113,6 +149,7 @@
   }
 
   function render() {
+    syncCountryOptions();
     const rows = visible();
     const tb = $("rows");
     tb.innerHTML = "";
@@ -126,6 +163,8 @@
         `<td title="${esc(c.image)}">${esc(shortImage(c.image))}</td>` +
         dest +
         `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
+        `<td class="owner" title="${c.asn ? "AS" + c.asn : "unknown owner"}">${esc(c.asOrg || "—")}</td>` +
+        `<td class="cc">${esc(c.country || "—")}${mismatchFlag(c)}</td>` +
         `<td>${esc(c.proto)}</td>` +
         `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
         `<td class="num">${esc(c.events || 1)}</td>`;
@@ -136,6 +175,20 @@
     $("c-talkers").textContent = new Set(rows.map(c => c.image)).size;
     $("c-domains").textContent = new Set(rows.map(c => c.domain || c.remoteIP)).size;
   }
+
+  function syncCountryOptions() {
+    const sel = $("ccfilter");
+    const seen = [...new Set(all.map(c => c.country).filter(Boolean))].sort();
+    const want = ["all", ...seen].join("|");
+    if (sel.dataset.built === want) return;
+    sel.dataset.built = want;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="all">All countries</option>' +
+      seen.map(cc => `<option value="${esc(cc)}">${esc(cc)}</option>`).join("");
+    sel.value = [...sel.options].some(o => o.value === cur) ? cur : "all";
+  }
+
+  $("ccfilter").addEventListener("change", (e) => { ccFilter = e.target.value; render(); });
 
   $("ipseg").addEventListener("click", (e) => {
     const b = e.target.closest("button");

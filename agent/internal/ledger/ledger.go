@@ -45,6 +45,11 @@ type Connection struct {
 	Domain     string
 	Verdict    string
 	Inbound    bool
+
+	// Offline recon: who owns the address block and where it is registered.
+	ASN     uint32
+	ASOrg   string
+	Country string
 }
 
 // DB wraps the SQLite handle.
@@ -103,9 +108,13 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 				 SET last_seen = ?, events = events + 1,
 				     domain = COALESCE(NULLIF(domain, ''), ?),
 				     image  = CASE WHEN image = '' THEN ? ELSE image END,
-				     inbound = CASE WHEN ? = 0 THEN 0 ELSE inbound END
+				     inbound = CASE WHEN ? = 0 THEN 0 ELSE inbound END,
+				     asn     = CASE WHEN asn = 0 THEN ? ELSE asn END,
+				     as_org  = COALESCE(NULLIF(as_org, ''), ?),
+				     country = COALESCE(NULLIF(country, ''), ?)
 				 WHERE id = ?`,
-				ts, nullable(c.Domain), c.Image, c.Inbound, id,
+				ts, nullable(c.Domain), c.Image, c.Inbound,
+				c.ASN, nullable(c.ASOrg), nullable(c.Country), id,
 			)
 			return err
 		}
@@ -115,10 +124,11 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	}
 
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound)
-		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
+		c.ASN, nullable(c.ASOrg), nullable(c.Country),
 	)
 	return err
 }
@@ -127,7 +137,8 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	rows, err := d.sql.Query(
 		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
-		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound
+		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound,
+		        asn, COALESCE(as_org, ''), COALESCE(country, '')
 		 FROM connections ORDER BY last_seen DESC, id DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -140,7 +151,8 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		var c Connection
 		var ts, last string
 		if err := rows.Scan(&ts, &last, &c.Events, &c.PID, &c.Image, &c.RemoteIP,
-			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound); err != nil {
+			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound,
+			&c.ASN, &c.ASOrg, &c.Country); err != nil {
 			return nil, err
 		}
 		c.Time = parseTS(ts)
