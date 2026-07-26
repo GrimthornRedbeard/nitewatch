@@ -15,6 +15,9 @@ rules:
       {{.ProcessName}} connected to {{.Destination}}. That server is
       {{.FeedReason}}.
 
+      The program is:
+        {{.ImagePath}}
+
       Programs contact servers like this when someone else is controlling them
       remotely — which usually means this program is malicious, or a legitimate
       program has been tampered with.
@@ -40,6 +43,9 @@ rules:
 
       Either part alone would be unremarkable. Together they are worth a look:
       software with no publisher, reaching an address it never asked for by name.
+
+      The program is:
+        {{.ImagePath}}
     playbook:
       - "Do you recognise {{.ProcessName}}? If not, look it up before doing anything else."
       - "Check who owns the address it contacted: {{.RemoteIP}}{{if .Owner}} (currently registered to {{.Owner}}){{end}}."
@@ -58,7 +64,9 @@ rules:
 
       Plenty of small and homemade tools are unsigned, so this on its own is not
       proof of anything — but unsigned software reaching out to the internet is
-      worth a second look.
+      worth a second look. Where it lives matters as much as its name:
+
+        {{.ImagePath}}
     playbook:
       - "Do you recognise {{.ProcessName}} and expect it to use the internet?"
       - "If not, find where it came from: {{.ImagePath}}"
@@ -77,6 +85,9 @@ rules:
       hosted internationally. It is flagged because it is the first time this
       program has gone there, and unexpected foreign connections are worth a
       glance.
+
+      The program is:
+        {{.ImagePath}}
     playbook:
       - "Does {{.ProcessName}} have a reason to talk to a server in {{.Country}}?"
       - "If it is a browser, a game, or a messaging app, this is probably normal."

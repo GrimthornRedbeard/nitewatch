@@ -113,6 +113,10 @@
   .alert .fix { border-color: #3d5a80; background: #16283d; color: #cfe4ff; }
   .alert .fix:hover { border-color: var(--accent); }
   .alert .fix.hard { border-color: #6a2a2a; background: #2a1414; color: #ffb3b3; }
+  .prog { margin: 8px 0 0; font-size: 12px; font-family: ui-monospace, monospace;
+    color: #cfd6e4; word-break: break-all; }
+  .prog .k { color: var(--muted); font-family: inherit; }
+  .prog .odd { color: var(--new); }
   .cause { margin: 10px 0 0; padding: 10px 12px; background: #0e1420;
     border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
   .cause h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
@@ -483,6 +487,20 @@
     return (!isNaN(d) && (Date.now() - d.getTime()) > 3600e3) ? " stale" : "";
   }
 
+  // Every alert names the program by FULL PATH. A bare filename is not an
+  // identity: "Agent.exe" in Program Files\\Battle.net is Blizzard's updater,
+  // and "Agent.exe" in AppData is something that chose a reassuring name.
+  // Telling those apart is the whole question a user is being asked to answer.
+  function programHTML(ev) {
+    const p = ev && (ev.ImagePath || ev.TargetPath || ev.Target);
+    if (!p) return "";
+    const odd = /\\(appdata|downloads|temp|public|programdata)\\/i.test(p);
+    return `<div class="prog"><span class="k">Program:</span> ` +
+      `<span class="${odd ? "odd" : ""}">${esc(p)}</span>` +
+      (odd ? ` <span class="k">— not where installed software normally lives</span>` : "") +
+      `</div>`;
+  }
+
   // Renders the causal context: what started this program, and what else it was
   // doing. This is the "why did that happen?" that a flat log cannot answer.
   function causeHTML(ev) {
@@ -513,6 +531,7 @@
     return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}">
       <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
+      ${programHTML(a.evidence)}
       ${steps ? `<ol>${steps}</ol>` : ""}
       ${causeHTML(a.evidence)}
       <div class="act" id="acts-${a.id}">

@@ -37,6 +37,9 @@ rules:
 
       Backup tools, sync clients and photo editors do this legitimately. So does
       ransomware in its first minute. It is worth checking that you started this.
+
+      The program is:
+        {{.ImagePath}}
     playbook:
       - "Did you just start a backup, a sync, or a bulk edit? If so, this is expected."
       - "If you did not, stop the program using the button below."
