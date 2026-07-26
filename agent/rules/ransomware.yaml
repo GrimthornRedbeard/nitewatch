@@ -1,0 +1,61 @@
+name: ransomware
+# Ransomware detection: something is rewriting the user's irreplaceable files.
+#
+# This is the highest-stakes pack. The narrative has to convey urgency without
+# panic, and the first playbook step has to be the one that limits damage —
+# because unlike every other alert, minutes matter here and the user may be
+# reading this while their files are still being encrypted.
+rules:
+  - id: ransomware-confirmed
+    area: ransomware
+    severity: critical
+    detector: mass-encryption-confirmed
+    title: "STOP — {{.ProcessName}} appears to be encrypting your files right now"
+    narrative: |
+      {{.ProcessName}} has changed {{.FileCount}} of your files in the last minute,
+      across {{.DirCount}} folders, and {{.EvidenceSummary}}.
+
+      This is what ransomware looks like. Files that have been encrypted cannot
+      be recovered without the attacker's key — but files it has not reached yet
+      can still be saved.
+    playbook:
+      - "Stop the program now using the button below, or hold the power button to shut down. Speed matters more than tidiness."
+      - "Do NOT pay any ransom demand before speaking to someone who can advise you."
+      - "Once stopped, disconnect from the internet before restarting."
+      - "Examples of files affected: {{.SampleFiles}}"
+      - "If you have a backup on a drive that is currently unplugged, LEAVE IT UNPLUGGED until this is resolved."
+      - "Program: {{.ImagePath}}"
+
+  - id: ransomware-suspected
+    area: ransomware
+    severity: high
+    detector: mass-encryption-suspected
+    title: "{{.ProcessName}} is changing a lot of your files very quickly"
+    narrative: |
+      {{.ProcessName}} has modified {{.FileCount}} of your documents and photos
+      in the last minute, spread across {{.DirCount}} folders.
+
+      Backup tools, sync clients and photo editors do this legitimately. So does
+      ransomware in its first minute. It is worth checking that you started this.
+    playbook:
+      - "Did you just start a backup, a sync, or a bulk edit? If so, this is expected."
+      - "If you did not, stop the program using the button below."
+      - "Examples of files affected: {{.SampleFiles}}"
+      - "Program: {{.ImagePath}}"
+
+  - id: ransomware-backup-destruction
+    area: ransomware
+    severity: critical
+    detector: backup-destruction
+    title: "Something is deleting your ability to recover files"
+    narrative: |
+      {{.ProcessName}} ran {{.ToolName}}, which deletes the automatic restore
+      points and shadow copies Windows keeps so you can recover files.
+
+      Ransomware does this immediately before encrypting, so the victim cannot
+      simply restore. Administrators also do it deliberately during maintenance.
+    playbook:
+      - "If you did not start a maintenance task, treat this as an emergency and disconnect from the internet."
+      - "Stop the program using the button below."
+      - "Do not restart the machine until you have advice — a shutdown may complete what this started."
+      - "Program: {{.ImagePath}}"

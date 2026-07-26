@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/0xrawsec/golang-etw/etw"
@@ -91,6 +93,14 @@ var etwProviders = []providerSpec{
 		// visibility into every destination contacted.
 		specs:    []string{"Microsoft-Windows-Kernel-Network"},
 		required: true, // without this there is no connection ledger at all
+	},
+	{
+		// Kernel-File returns in P2 for ransomware and credential detection.
+		// It is the highest-volume provider on the system, so normalize()
+		// discards everything outside user data and secret stores immediately.
+		name:     "Kernel-File",
+		specs:    []string{"Microsoft-Windows-Kernel-File"},
+		required: false,
 	},
 	{
 		name:     "DNS-Client",
@@ -250,13 +260,100 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 			return ne, false
 		}
 	case "Microsoft-Windows-Kernel-File":
+		// Kernel-File is the volume problem. Create/NameCreate events carry a
+		// FileName and a key; Write events carry only the key. Names are
+		// therefore learned from create events and looked up on write, and
+		// anything we cannot name, or that is not user data, is dropped here
+		// rather than carried through the pipeline.
+		name := str(e.EventData, "FileName", "FilePath", "OpenPath")
+		key := str(e.EventData, "FileKey", "FileObject")
+
+		if name != "" {
+			if key != "" && interestingPath(name) {
+				fileNames.put(key, name)
+			}
+		} else if key != "" {
+			name = fileNames.get(key)
+		}
+		if name == "" || !interestingPath(name) {
+			return ne, false
+		}
 		ne.Kind = event.KindFileWrite
 		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
-		ne.Path = str(e.EventData, "FileName", "FilePath", "OpenPath")
+		ne.Path = normalizeImagePath(name)
 	default:
 		return ne, false
 	}
 	return ne, true
+}
+
+// fileNames maps ETW file keys to paths.
+//
+// Bounded on purpose: a file-name cache that grows with disk activity would be
+// a memory leak proportional to I/O, and the machine doing the most I/O is
+// exactly the one under attack.
+var fileNames = newNameCache(4096)
+
+type nameCache struct {
+	mu    sync.Mutex
+	max   int
+	names map[string]string
+	order []string
+}
+
+func newNameCache(max int) *nameCache {
+	return &nameCache{max: max, names: make(map[string]string, max)}
+}
+
+func (c *nameCache) put(key, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.names[key]; ok {
+		return
+	}
+	if len(c.order) >= c.max {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.names, oldest)
+	}
+	c.names[key] = name
+	c.order = append(c.order, key)
+}
+
+func (c *nameCache) get(key string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.names[key]
+}
+
+// skipFragments are the bulk of user-profile I/O and never hold irreplaceable
+// data: caches, build output, browser scratch.
+var skipFragments = []string{
+	`\appdata\local\temp\`,
+	`\appdata\local\microsoft\windows\inetcache\`,
+	`\appdata\local\packages\`,
+	`\node_modules\`,
+	`\.git\`,
+	`\appdata\locallow\`,
+	`\appdata\local\crashdumps\`,
+	`\cache\`,
+	`\cache2\`,
+	`ntuser.dat`,
+}
+
+// interestingPath decides whether a file event is worth carrying at all. It
+// runs on EVERY file event on the system, so it stays a cheap string test.
+func interestingPath(path string) bool {
+	p := strings.ToLower(path)
+	if !strings.Contains(p, `\users\`) {
+		return false // everything we care about lives under a user profile
+	}
+	for _, skip := range skipFragments {
+		if strings.Contains(p, skip) {
+			return false
+		}
+	}
+	return true
 }
 
 // netProto distinguishes TCP from UDP using the event task/opcode name, which

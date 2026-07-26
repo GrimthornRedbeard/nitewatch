@@ -14,6 +14,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/autostart"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/event"
+	"github.com/threattape/nitewatch/agent/internal/filewatch"
 	"github.com/threattape/nitewatch/agent/internal/graph"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/notify"
@@ -72,6 +73,7 @@ type Collector struct {
 
 	imageCache map[uint32]string
 	suppress   *detect.Suppressor
+	files      *filewatch.Tracker
 
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
@@ -101,6 +103,7 @@ func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Colle
 		opts:       opts,
 		imageCache: make(map[uint32]string),
 		suppress:   detect.NewSuppressor(),
+		files:      filewatch.NewTracker(),
 	}
 }
 
@@ -142,6 +145,25 @@ func (c *Collector) Run(ctx context.Context) error {
 
 func (c *Collector) ingest(e event.NormalizedEvent) {
 	id := c.window.Ingest(e)
+
+	switch e.Kind {
+	case event.KindProcStart:
+		// Backup-destruction tools are judged the moment they start: by the
+		// time they finish, the restore points are already gone.
+		if c.opts.Detect != nil && filewatch.ShadowCopyTool(e.Image) {
+			c.reportFile(detect.FileSubject{
+				PID: e.PID, Image: e.Image, ToolRun: shortBase(e.Image),
+			}, e.Time)
+		}
+	case event.KindProcExit:
+		c.files.Forget(e.PID)
+	case event.KindFileWrite:
+		if c.opts.Detect != nil {
+			c.onFileWrite(e)
+		}
+		return
+	}
+
 	if e.Kind != event.KindNetConnect {
 		return
 	}
@@ -283,6 +305,80 @@ func (c *Collector) dedupWindow() time.Duration {
 		return c.opts.Live.DedupWindow()
 	}
 	return c.opts.DedupWindow
+}
+
+// onFileWrite feeds file activity to the burst tracker and the credential
+// detector.
+func (c *Collector) onFileWrite(e event.NormalizedEvent) {
+	image := e.Image
+	if image == "" {
+		image = c.window.Current().ImageFor(e.PID)
+	}
+	if image == "" {
+		image = c.lookupImage(e.PID)
+	}
+
+	switch filewatch.Classify(e.Path) {
+	case filewatch.Credential:
+		// Reading a secret store is judged on the spot: one read is the whole
+		// event, and waiting for a pattern would mean waiting until after the
+		// passwords were already taken.
+		signed, signer := c.signerOf(image)
+		c.reportFile(detect.FileSubject{
+			PID: e.PID, Image: image, Path: e.Path, Signed: signed, Signer: signer,
+		}, e.Time)
+	case filewatch.UserDocument, filewatch.RansomNote:
+		burst := c.files.Record(e.PID, image, e.Path, e.Time)
+		if filewatch.Assess(burst) == filewatch.Nothing {
+			return
+		}
+		signed, signer := c.signerOf(image)
+		c.reportFile(detect.FileSubject{
+			PID: e.PID, Image: image, Signed: signed, Signer: signer, Burst: burst,
+		}, e.Time)
+	}
+}
+
+func (c *Collector) signerOf(image string) (bool, string) {
+	if c.opts.SignerLookup == nil || image == "" {
+		return false, ""
+	}
+	return c.opts.SignerLookup(image)
+}
+
+func shortBase(p string) string {
+	for i := len(p) - 1; i >= 0; i-- {
+		if p[i] == '\\' || p[i] == '/' {
+			return p[i+1:]
+		}
+	}
+	return p
+}
+
+// reportFile persists and notifies file-activity detections.
+func (c *Collector) reportFile(subj detect.FileSubject, at time.Time) {
+	for _, d := range c.opts.Detect.EvaluateFile(subj) {
+		// File alerts anchor on the process rather than a connection, so one
+		// encryption sweep produces one alert instead of one per file.
+		anchor := -int64(subj.PID) - 1
+		created, err := c.ledger.RecordAlert(ledger.Alert{
+			Time: at, RuleID: d.Rule.ID, Area: string(d.Rule.Area),
+			Severity:  string(d.Rule.Severity),
+			Title:     d.Rule.RenderTitle(d.Fields),
+			Narrative: d.Rule.RenderNarrative(d.Fields),
+			Playbook:  d.Rule.RenderPlaybook(d.Fields),
+			ConnID:    anchor,
+			Evidence:  d.Fields,
+		})
+		if err == nil && created {
+			title := d.Rule.RenderTitle(d.Fields)
+			log.Printf("ALERT [%s] %s", d.Rule.Severity, title)
+			c.opts.Notify.Deliver(d.Rule.ID, notify.Alert{
+				Severity: string(d.Rule.Severity), Title: title,
+				Body: d.Rule.RenderNarrative(d.Fields),
+			}, at)
+		}
+	}
 }
 
 // backfillNames periodically attaches reverse-DNS names to rows that were

@@ -13,7 +13,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +37,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/rules"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
+	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
 var version = "0.1.0-dev"
@@ -202,9 +202,6 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	return nil
 }
 
-//go:embed all:rules
-var builtinRules embed.FS
-
 // startDetection loads rule packs and (unless disabled) threat feeds. Detection
 // is optional: a pack that fails to load must not stop the flight recorder,
 // which is useful on its own.
@@ -236,12 +233,12 @@ func startDetection(rulesDir string, noFeeds bool) *detect.Engine {
 			load(e.Name(), data)
 		}
 	} else {
-		entries, _ := builtinRules.ReadDir("rules")
+		entries, _ := rulesdata.Packs.ReadDir(".")
 		for _, e := range entries {
 			if filepath.Ext(e.Name()) != ".yaml" {
 				continue
 			}
-			data, err := builtinRules.ReadFile("rules/" + e.Name())
+			data, err := rulesdata.Packs.ReadFile(e.Name())
 			if err != nil {
 				continue
 			}
