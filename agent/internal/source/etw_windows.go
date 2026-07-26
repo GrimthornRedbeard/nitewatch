@@ -67,15 +67,43 @@ func dumpRecord(e *etw.Event) {
 // needs process + network + DNS, and Kernel-File is the highest-volume provider
 // on the system. It comes back in P2 for ransomware-pattern detection, scoped
 // to the events that actually matter.
-var etwProviders = []string{
-	// Kernel-Process, event IDs 1 (ProcessStart) and 2 (ProcessStop) only.
-	"Microsoft-Windows-Kernel-Process:0xff:1,2:0x10",
-	// Kernel-Network: all events (connect/send/recv, v4 and v6). Volume is
-	// handled by flow de-duplication in the ledger rather than dropped here,
-	// so we keep visibility into every destination contacted.
-	"Microsoft-Windows-Kernel-Network",
-	// DNS-Client: query events carry QueryName/QueryResults.
-	"Microsoft-Windows-DNS-Client",
+// Each entry is tried in order and the first that enables wins, so a spec that
+// a given Windows build rejects degrades to a broader one instead of killing
+// the sensor. Keyword filtering (MatchAnyKeyword) is used rather than event-ID
+// filter descriptors: the latter are rejected outright by some builds
+// (EnableTraceEx2 -> ERROR_INVALID_PARAMETER, observed on Win11).
+var etwProviders = []providerSpec{
+	{
+		name: "Kernel-Process",
+		// Keyword 0x10 = WINEVENT_KEYWORD_PROCESS: process start/stop only,
+		// excluding the CPU_PRIORITY (0x80) and WORK_ON_BEHALF (0x2000)
+		// bookkeeping that otherwise dominates the stream.
+		specs: []string{
+			"Microsoft-Windows-Kernel-Process:0xff::0x10",
+			"Microsoft-Windows-Kernel-Process",
+		},
+		required: false,
+	},
+	{
+		name: "Kernel-Network",
+		// All network events (v4/v6, TCP/UDP). Volume is handled by flow
+		// de-duplication in the ledger rather than dropped here, so we keep
+		// visibility into every destination contacted.
+		specs:    []string{"Microsoft-Windows-Kernel-Network"},
+		required: true, // without this there is no connection ledger at all
+	},
+	{
+		name:     "DNS-Client",
+		specs:    []string{"Microsoft-Windows-DNS-Client"},
+		required: false, // reverse DNS still names destinations without it
+	},
+}
+
+// providerSpec is one logical telemetry source and its fallback ladder.
+type providerSpec struct {
+	name     string
+	specs    []string
+	required bool
 }
 
 type etwSource struct {
@@ -89,16 +117,52 @@ type etwSource struct {
 // process must run elevated; EnableProvider will fail otherwise.
 func NewETWSource() (EventSource, error) {
 	session := etw.NewRealTimeSession("NiteWatch")
-	for _, name := range etwProviders {
-		p, err := etw.ParseProvider(name)
-		if err != nil {
-			return nil, err
+
+	var enabled int
+	for _, ps := range etwProviders {
+		err := enableWithFallback(session, ps)
+		if err == nil {
+			enabled++
+			continue
 		}
-		if err := session.EnableProvider(p); err != nil {
-			return nil, err
+		if ps.required {
+			_ = session.Stop()
+			return nil, fmt.Errorf("enable %s: %w", ps.name, err)
 		}
+		// Optional provider: log and carry on with reduced telemetry rather
+		// than leaving the user with no sensor at all.
+		log.Printf("etw: %s unavailable (%v); continuing without it", ps.name, err)
+	}
+	if enabled == 0 {
+		_ = session.Stop()
+		return nil, fmt.Errorf("no ETW providers could be enabled")
 	}
 	return &etwSource{session: session}, nil
+}
+
+// enableWithFallback tries each spec in order, returning nil on the first that
+// enables. Windows builds differ in which filter forms they accept.
+func enableWithFallback(session *etw.RealTimeSession, ps providerSpec) error {
+	var lastErr error
+	for i, spec := range ps.specs {
+		p, err := etw.ParseProvider(spec)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := session.EnableProvider(p); err != nil {
+			lastErr = err
+			log.Printf("etw: %s spec %q rejected (%v)", ps.name, spec, err)
+			continue
+		}
+		if i > 0 {
+			log.Printf("etw: %s enabled via fallback spec %q", ps.name, spec)
+		} else {
+			log.Printf("etw: %s enabled", ps.name)
+		}
+		return nil
+	}
+	return lastErr
 }
 
 func (s *etwSource) Events(ctx context.Context) (<-chan event.NormalizedEvent, error) {
