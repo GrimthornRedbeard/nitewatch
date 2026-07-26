@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -33,23 +34,46 @@ import (
 
 var version = "0.1.0-dev"
 
+// baseDir is the directory the agent keeps its files in — next to the exe, so
+// there are no %ProgramData% permission variables to reason about during
+// testing. Falls back to the working directory.
+func baseDir() string {
+	if exe, err := os.Executable(); err == nil {
+		return filepath.Dir(exe)
+	}
+	return "."
+}
+
 func main() {
 	var (
 		replayPath = flag.String("replay", "", "replay events from a .jsonl trace instead of live ETW")
 		serve      = flag.Bool("serve", true, "serve the localhost dashboard + API")
 		open       = flag.Bool("open", true, "open the dashboard in a browser when serving (Windows)")
-		dbPath     = flag.String("db", defaultDBPath(), "path to the connection ledger database")
+		dbPath     = flag.String("db", filepath.Join(baseDir(), "nitewatch.db"), "path to the connection ledger database")
 	)
 	flag.Parse()
 
 	closeLog := setupLogging()
 	defer closeLog()
 
+	// Any panic must leave a readable trail and hold the window open.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC: %v\n%s", r, debug.Stack())
+			holdOpen()
+			os.Exit(2)
+		}
+	}()
+
 	log.Printf("NiteWatch agent %s", version)
+	log.Printf("env: os=%s arch=%s elevated=%v", runtime.GOOS, runtime.GOARCH, platform.IsElevated())
+	if exe, err := os.Executable(); err == nil {
+		log.Printf("env: exe=%s", exe)
+	}
+
 	if err := run(*replayPath, *serve, *open, *dbPath); err != nil {
 		log.Printf("fatal: %v", err)
-		// Give a double-click user a beat to read the console before it closes.
-		time.Sleep(5 * time.Second)
+		holdOpen()
 		os.Exit(1)
 	}
 }
@@ -57,15 +81,16 @@ func main() {
 func run(replayPath string, serve, open bool, dbPath string) error {
 	if dir := filepath.Dir(dbPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create ledger dir: %w", err)
+			return fmt.Errorf("create ledger dir %q: %w", dir, err)
 		}
 	}
+	log.Printf("ledger: opening %s", dbPath)
 	led, err := ledger.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open ledger: %w", err)
 	}
 	defer led.Close()
-	log.Printf("ledger: %s", dbPath)
+	log.Printf("ledger: ready")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -102,6 +127,7 @@ func run(replayPath string, serve, open bool, dbPath string) error {
 			Elevated: platform.IsElevated(),
 			Message:  srcErr.Error(),
 		})
+		log.Printf("dashboard is up; serving without live telemetry (Ctrl+C to stop)")
 		<-ctx.Done()
 		return nil
 	}
@@ -121,6 +147,7 @@ func run(replayPath string, serve, open bool, dbPath string) error {
 	go func() { collErr <- coll.Run(ctx) }()
 
 	if serve {
+		log.Printf("running; dashboard at http://%s (Ctrl+C to stop)", srv.Addr())
 		<-ctx.Done() // serving: run until interrupted
 		return nil
 	}
@@ -147,29 +174,24 @@ func sourceName(replayPath string) string {
 	return "live-etw"
 }
 
-// setupLogging tees log output to a file (so a flashed-and-closed console still
-// leaves a diagnosable trail) and to stderr. Returns a close func.
+// setupLogging tees log output to a file next to the exe (so a flashed-and-closed
+// console still leaves a diagnosable trail) and to stderr.
 func setupLogging() func() {
-	logPath := filepath.Join(logDir(), "nitewatch.log")
-	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
+	logPath := filepath.Join(baseDir(), "nitewatch.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not open log file %q: %v\n", logPath, err)
 		return func() {}
 	}
 	log.SetOutput(io.MultiWriter(os.Stderr, f))
-	log.Printf("logging to %s", logPath)
+	log.Printf("=== NiteWatch starting; logging to %s ===", logPath)
 	return func() { f.Close() }
 }
 
-func logDir() string {
+// holdOpen keeps a double-click console window open long enough to read.
+func holdOpen() {
 	if runtime.GOOS == "windows" {
-		if pd := os.Getenv("ProgramData"); pd != "" {
-			return filepath.Join(pd, "NiteWatch")
-		}
+		fmt.Fprint(os.Stderr, "\nNiteWatch exited. This window stays open for 15s so you can read the error above.\n")
+		time.Sleep(15 * time.Second)
 	}
-	return "."
-}
-
-func defaultDBPath() string {
-	return filepath.Join(logDir(), "ledger.db")
 }
