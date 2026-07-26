@@ -17,6 +17,10 @@ const (
 	KindNetConnect Kind = "NetConnect"
 	KindDNSQuery   Kind = "DNSQuery"
 	KindFileWrite  Kind = "FileWrite"
+	// KindRegPersist is an autostart installation: a Run key, service, scheduled
+	// task, startup-folder drop, or WMI event subscription. Legitimate software
+	// does this at install time; implants do it to survive reboot.
+	KindRegPersist Kind = "RegPersist"
 )
 
 // NormalizedEvent is the source-agnostic representation of one telemetry record.
@@ -47,6 +51,17 @@ type NormalizedEvent struct {
 
 	// File (FileWrite):
 	Path string `json:"path,omitempty"`
+
+	// Persistence (RegPersist): what autostart mechanism was installed, where,
+	// and what it will run.
+	PersistKind     string `json:"persistKind,omitempty"` // run-key|service|scheduled-task|startup-folder|wmi
+	PersistLocation string `json:"persistLocation,omitempty"`
+	PersistTarget   string `json:"persistTarget,omitempty"`
+
+	// Code signing (ProcStart). Signed defaults to false: absent signature data
+	// must never read as "signed", or suppression rules would trust unknowns.
+	Signed bool   `json:"signed,omitempty"`
+	Signer string `json:"signer,omitempty"`
 
 	// Opportunistic enrichment (signer, hash, ...).
 	Extra map[string]string `json:"extra,omitempty"`

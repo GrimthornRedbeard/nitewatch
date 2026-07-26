@@ -16,6 +16,22 @@
 - `docs/plans/2026-07-25-p1-flight-recorder.md` — the building blocks this extends.
 - P1 code: `internal/event` (vocabulary), `internal/graph` (causal window + `DomainFor`), `internal/ledger` (`IsNewDestination`), `internal/source` (the `//go:build windows` sensor pattern), `internal/api` (loopback server + embedded dashboard).
 
+## Reconciliation with what P1 actually shipped (2026-07-26)
+
+P1 grew past its own plan during real-device debugging. Three changes to this plan:
+
+- **Task 7's causal subgraph is already built.** `graph.StoryFor` walks `CausalAncestors`,
+  orders by Lamport clock, renders Mermaid, and every connection already persists its
+  serialized story. Task 7 shrinks to: alert table + narrative templating, reusing
+  `StoryFor` rather than building subgraph extraction.
+- **Recon (AS owner + country) exists and is a new detection signal** this plan predates.
+  It enables rules the original design doc didn't anticipate — geography-based
+  ("this process is talking to a network registered in <country>") and ownership-mismatch
+  ("this program's traffic goes to a network unrelated to its vendor, and not to shared
+  cloud hosting"). Added to the C2 pack in Task 4.
+- **Settings store exists.** Feed enable/disable and the allowlist belong there rather
+  than in new flags, and the dashboard already has a settings panel to extend.
+
 ## Design Constraints Carried From P1
 
 - **Templated advisories only** — hand-written narrative + playbook per rule. No LLM in the alert path.
