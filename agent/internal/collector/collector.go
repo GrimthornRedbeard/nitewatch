@@ -38,6 +38,11 @@ type Options struct {
 	// Recon supplies offline address ownership (AS owner / country). Optional:
 	// when nil, rows simply carry no ownership data.
 	Recon *recon.DB
+	// ProcessTable snapshots the running process list at startup. Without it
+	// the agent has no lineage for anything that began before it did — which is
+	// every service, the browser, and explorer — so "what started this?" has no
+	// answer for exactly the processes users ask about most.
+	ProcessTable func() ([]ProcInfo, error)
 	// SignerLookup reports whether an executable is signed and by whom.
 	// Injected like ImageLookup so the collector stays platform-agnostic.
 	SignerLookup func(path string) (signed bool, signer string)
@@ -81,7 +86,10 @@ type Collector struct {
 	// itself is one nobody believes about anything else.
 	selfPID   uint32
 	selfImage string
-	files     *filewatch.Tracker
+	// serviceNames maps a PID to the Windows services it hosts. Every svchost
+	// looks identical otherwise, and "svchost.exe" tells a user nothing.
+	serviceNames map[uint32][]string
+	files        *filewatch.Tracker
 
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
@@ -103,17 +111,18 @@ func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Colle
 		opts.DedupWindow = 0
 	}
 	return &Collector{
-		src:        src,
-		window:     graph.NewWindow(graph.WindowConfig{}),
-		ledger:     led,
-		resolver:   resolve.New(),
-		localNets:  resolve.DetectLocalNets(),
-		opts:       opts,
-		imageCache: make(map[uint32]string),
-		suppress:   detect.NewSuppressor(),
-		selfPID:    uint32(os.Getpid()),
-		selfImage:  strings.ToLower(selfExecutable()),
-		files:      filewatch.NewTracker(),
+		src:          src,
+		window:       graph.NewWindow(graph.WindowConfig{}),
+		ledger:       led,
+		resolver:     resolve.New(),
+		localNets:    resolve.DetectLocalNets(),
+		opts:         opts,
+		imageCache:   make(map[uint32]string),
+		suppress:     detect.NewSuppressor(),
+		selfPID:      uint32(os.Getpid()),
+		selfImage:    strings.ToLower(selfExecutable()),
+		files:        filewatch.NewTracker(),
+		serviceNames: map[uint32][]string{},
 	}
 }
 
@@ -130,12 +139,64 @@ func (c *Collector) LoadAllows() {
 	c.suppress.AddKeys(keys)
 }
 
+// ProcInfo mirrors platform.ProcInfo without importing it, keeping the
+// collector platform-agnostic.
+type ProcInfo struct {
+	PID      uint32
+	PPID     uint32
+	Image    string
+	Services []string
+}
+
+// seedProcessTable gives the causal graph a starting point for processes that
+// were already running. Their real ProcessStart events are long gone, so these
+// are synthetic — the parent relationship is genuine, the timing is not, and
+// the graph records them as observed-at-startup rather than pretending
+// otherwise.
+func (c *Collector) seedProcessTable() {
+	if c.opts.ProcessTable == nil {
+		return
+	}
+	procs, err := c.opts.ProcessTable()
+	if err != nil || len(procs) == 0 {
+		return
+	}
+	// Parents before children, so each child finds its parent already present.
+	byPID := make(map[uint32]ProcInfo, len(procs))
+	for _, p := range procs {
+		byPID[p.PID] = p
+	}
+	seeded := map[uint32]bool{}
+	var seed func(p ProcInfo, depth int)
+	seed = func(p ProcInfo, depth int) {
+		if seeded[p.PID] || depth > 32 { // depth guard: PID tables can cycle
+			return
+		}
+		if parent, ok := byPID[p.PPID]; ok {
+			seed(parent, depth+1)
+		}
+		seeded[p.PID] = true
+		c.window.Ingest(event.NormalizedEvent{
+			Kind: event.KindProcStart, PID: p.PID, PPID: p.PPID,
+			Image: p.Image, Time: time.Now(),
+		})
+		if len(p.Services) > 0 {
+			c.serviceNames[p.PID] = p.Services
+		}
+	}
+	for _, p := range procs {
+		seed(p, 0)
+	}
+	log.Printf("processes: seeded %d already-running processes for lineage", len(seeded))
+}
+
 // Run consumes the source until its channel closes or ctx is cancelled.
 func (c *Collector) Run(ctx context.Context) error {
 	ch, err := c.src.Events(ctx)
 	if err != nil {
 		return err
 	}
+	c.seedProcessTable()
 	go c.backfillNames(ctx)
 	go c.pruneLoop(ctx)
 	if c.opts.Detect != nil {
@@ -228,6 +289,13 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 	}
 	if image == "" {
 		image = c.lookupImage(e.PID)
+	}
+
+	// svchost hosting is the single most common "what IS this?" question on a
+	// Windows machine: every copy is the same binary spawned by services.exe,
+	// so the service it hosts is the only identity that means anything.
+	if svcs := c.serviceNames[e.PID]; len(svcs) > 0 {
+		image = labelWithServices(image, svcs)
 	}
 
 	conn := ledger.Connection{
@@ -342,6 +410,21 @@ func (c *Collector) pruneLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// labelWithServices renders a service-hosting process for display:
+// "C:\Windows\System32\svchost.exe" becomes
+// "Windows Update (svchost.exe)".
+func labelWithServices(image string, services []string) string {
+	base := image
+	if i := strings.LastIndexAny(image, `\/`); i >= 0 {
+		base = image[i+1:]
+	}
+	shown := services
+	if len(shown) > 3 {
+		shown = append(append([]string{}, shown[:3]...), "…")
+	}
+	return strings.Join(shown, ", ") + " (" + base + ")"
 }
 
 // isSelf reports whether an event describes this agent's own activity.

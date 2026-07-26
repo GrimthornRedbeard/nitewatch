@@ -93,6 +93,17 @@ func main() {
 	opts := collector.Options{
 		ImageLookup:  platform.ProcessImage,
 		SignerLookup: platform.FileSigner,
+		ProcessTable: func() ([]collector.ProcInfo, error) {
+			ps, err := platform.ProcessTable()
+			if err != nil {
+				return nil, err
+			}
+			out := make([]collector.ProcInfo, 0, len(ps))
+			for _, p := range ps {
+				out = append(out, collector.ProcInfo{PID: p.PID, PPID: p.PPID, Image: p.Image, Services: p.Services})
+			}
+			return out, nil
+		},
 	}
 	if eng := startDetection(*rulesDir, *noFeeds); eng != nil {
 		opts.Detect = eng
