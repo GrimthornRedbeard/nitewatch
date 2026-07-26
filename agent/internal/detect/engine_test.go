@@ -96,8 +96,10 @@ func TestTorExitAloneDoesNotAlert(t *testing.T) {
 func TestRawIPWithoutDNSFires(t *testing.T) {
 	e := New(loadShippedPack(t), nil)
 	subj := Subject{
-		Event:  event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
-		Conn:   ledger.Connection{Image: `C:\App\thing.exe`, RemoteIP: "203.0.113.9", RemotePort: 443},
+		Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		Conn:  ledger.Connection{Image: `C:\App\thing.exe`, RemoteIP: "203.0.113.9", RemotePort: 443},
+		// Ownership data is required for this rule to be judgeable at all.
+		Recon:  recon.Info{ASN: 64500, Org: "SOME-SMALL-HOSTING-LLC"},
 		HadDNS: false, FirstContact: true,
 	}
 	if d := find(e.Evaluate(subj), "c2-raw-ip-no-dns"); d == nil {
@@ -192,6 +194,7 @@ func TestNilIntelStoreDisablesFeedDetectorOnly(t *testing.T) {
 	got := e.Evaluate(Subject{
 		Event:  event.NormalizedEvent{Kind: event.KindNetConnect},
 		Conn:   ledger.Connection{Image: `C:\x\y.exe`, RemoteIP: "203.0.113.5", RemotePort: 443},
+		Recon:  recon.Info{ASN: 64500, Org: "SOME-SMALL-HOSTING-LLC"},
 		HadDNS: false, FirstContact: true,
 	})
 	if find(got, "c2-feed-flagged-connection") != nil {
@@ -249,5 +252,21 @@ func TestSharedInfrastructureRecognition(t *testing.T) {
 		if SharedInfrastructure(org) {
 			t.Errorf("%q must not be treated as shared infrastructure", org)
 		}
+	}
+}
+
+// The CDN suppression depends on ownership data that downloads in the
+// background. Firing before it loads would reproduce the very false positives
+// the suppression exists to prevent — on every single restart.
+func TestRawIPRuleStaysQuietWithoutOwnershipData(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	noRecon := Subject{
+		Event:  event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true},
+		Conn:   ledger.Connection{Image: `C:\App\app.exe`, RemoteIP: "151.101.54.49", RemotePort: 443},
+		HadDNS: false, FirstContact: true,
+		// Recon deliberately zero: dataset not loaded yet.
+	}
+	if d := find(e.Evaluate(noRecon), "c2-raw-ip-no-dns"); d != nil {
+		t.Fatal("without ownership data the signal cannot be judged and must not alert")
 	}
 }

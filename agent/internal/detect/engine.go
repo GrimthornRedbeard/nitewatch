@@ -166,6 +166,15 @@ func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
 	if s.Domain != "" {
 		return nil
 	}
+	// Ownership data is what makes this signal judgeable, and it loads in the
+	// background over a 45MB download. Firing while it is unavailable would
+	// mean every restart produces the CDN false positives this rule is
+	// explicitly meant to avoid. A weak signal we cannot contextualise is not
+	// worth interrupting someone over — better to miss it than to cry wolf on
+	// every boot.
+	if s.Recon.Org == "" {
+		return nil
+	}
 	if SharedInfrastructure(s.Recon.Org) {
 		return nil
 	}
