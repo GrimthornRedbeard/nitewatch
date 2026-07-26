@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS connections (
 	inbound     INTEGER NOT NULL DEFAULT 0,
 	asn         INTEGER NOT NULL DEFAULT 0,
 	as_org      TEXT,
-	country     TEXT
+	country     TEXT,
+	story       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_conn_ts ON connections(ts);
 CREATE INDEX IF NOT EXISTS idx_conn_image_domain ON connections(image, domain);

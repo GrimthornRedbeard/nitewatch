@@ -52,15 +52,85 @@
     border: 1px solid #6a4a00; background: #2a2000; color: var(--new); }
   .banner.show { display: block; }
   .banner b { color: #fff; }
+  .tools { margin-left: auto; display: flex; gap: 8px; }
+  .btn { background: var(--panel); border: 1px solid var(--line); color: var(--fg);
+    padding: 7px 13px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .panel { display: none; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
+  .panel.show { display: block; }
+  .panel h2 { margin: 0 0 4px; font-size: 15px; }
+  .panel .hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .opt { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+    border-top: 1px solid var(--line); }
+  .opt:first-of-type { border-top: 0; }
+  .opt label { font-weight: 500; }
+  .opt .d { color: var(--muted); font-size: 12px; }
+  .opt input[type=number] { width: 90px; padding: 6px 8px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; color: var(--fg); }
+  .opt .ctl { margin-left: auto; }
+  .saved { color: #7ddc9a; font-size: 12px; margin-left: 10px; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: #1a2130; }
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  .modal.show { display: flex; }
+  .modal .box { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; max-width: 720px; width: 100%; max-height: 85vh;
+    overflow: auto; padding: 20px 22px; }
+  .chain { list-style: none; margin: 14px 0 0; padding: 0; }
+  .chain li { position: relative; padding: 0 0 18px 26px; border-left: 2px solid var(--line); }
+  .chain li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  .chain li::before { content: ""; position: absolute; left: -7px; top: 4px;
+    width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+  .chain .k { font-weight: 600; }
+  .chain .s { color: var(--accent); }
+  .chain .d { color: var(--muted); font-size: 12px; }
+  .why { color: var(--muted); font-size: 12px; margin-top: 16px;
+    border-top: 1px solid var(--line); padding-top: 12px; }
 </style>
 </head>
 <body>
 <header>
   <h1>NiteWatch</h1>
   <span class="tag">Who's talking? — outbound connection ledger</span>
+  <div class="tools"><button class="btn" id="settings-btn">Settings</button></div>
 </header>
 <div class="wrap">
   <div id="banner" class="banner"></div>
+
+  <div id="settings" class="panel">
+    <h2>Settings</h2>
+    <p class="hint">Changes apply immediately — no restart. Stored on this machine.</p>
+    <div class="opt">
+      <div><label for="s-local">Include local network traffic</label>
+        <div class="d">Records LAN, loopback and link-local destinations. Very noisy; none of it is phoning home.</div></div>
+      <div class="ctl"><input type="checkbox" id="s-local"></div>
+    </div>
+    <div class="opt">
+      <div><label for="s-resolve">Look up names for addresses</label>
+        <div class="d">Reverse-DNS for destinations no observed lookup named. Uses your normal DNS resolver.</div></div>
+      <div class="ctl"><input type="checkbox" id="s-resolve"></div>
+    </div>
+    <div class="opt">
+      <div><label for="s-recon">Show address owner and country</label>
+        <div class="d">Uses an offline dataset downloaded once (~45&nbsp;MB, ~21&nbsp;MB memory). No per-address lookups leave this machine.</div></div>
+      <div class="ctl"><input type="checkbox" id="s-recon"></div>
+    </div>
+    <div class="opt">
+      <div><label for="s-dedup">Group repeat activity for (seconds)</label>
+        <div class="d">Windows reports network activity per packet. Repeats to the same destination collapse into one row within this window.</div></div>
+      <div class="ctl"><input type="number" id="s-dedup" min="1" max="3600"></div>
+    </div>
+    <div class="opt">
+      <div><label for="s-retention">Keep history for (days)</label>
+        <div class="d">How long connection history is retained.</div></div>
+      <div class="ctl"><input type="number" id="s-retention" min="1" max="3650"></div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="btn" id="s-save">Save</button><span class="saved" id="s-saved" hidden>Saved</span>
+    </div>
+  </div>
   <div class="cards">
     <div class="card"><div class="n" id="c-total">–</div><div class="l">Connections</div></div>
     <div class="card"><div class="n" id="c-talkers">–</div><div class="l">Processes</div></div>
@@ -88,8 +158,21 @@
     <tbody id="rows"></tbody>
   </table>
   <div id="empty" class="empty" hidden>No connections recorded yet.</div>
-  <div class="foot">Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+  <div class="foot">Click any row to see what caused that connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
 </div>
+
+<div class="modal" id="story-modal">
+  <div class="box">
+    <h2 id="story-title" style="margin:0 0 4px;font-size:15px"></h2>
+    <p class="hint" id="story-sub" style="color:var(--muted);font-size:12px;margin:0"></p>
+    <ol class="chain" id="story-chain"></ol>
+    <p class="why">This chain is reconstructed from the causal event graph — each step is
+      an event that <em>caused</em> the next, ordered by logical (Lamport) clock rather than
+      wall-clock time.</p>
+    <div style="margin-top:14px"><button class="btn" id="story-close">Close</button></div>
+  </div>
+</div>
+
 <script>
   let all = [];
   const $ = (id) => document.getElementById(id);
@@ -155,6 +238,11 @@
     tb.innerHTML = "";
     for (const c of rows) {
       const tr = document.createElement("tr");
+      if (c.hasStory) {
+        tr.className = "clickable";
+        tr.title = "Click to see what caused this connection";
+        tr.addEventListener("click", () => showStory(c));
+      }
       const dest = c.domain
         ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
         : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
@@ -197,6 +285,75 @@
     for (const el of $("ipseg").children) el.classList.toggle("on", el === b);
     render();
   });
+  // --- settings ---
+  $("settings-btn").addEventListener("click", async () => {
+    const p = $("settings");
+    p.classList.toggle("show");
+    if (p.classList.contains("show")) await loadSettings();
+  });
+  async function loadSettings() {
+    try {
+      const v = await (await fetch("/api/settings")).json();
+      $("s-local").checked = !!v.includeLocal;
+      $("s-resolve").checked = !!v.resolveNames;
+      $("s-recon").checked = !!v.recon;
+      $("s-dedup").value = v.dedupSeconds;
+      $("s-retention").value = v.retentionDays;
+    } catch (e) { /* panel stays as-is */ }
+  }
+  $("s-save").addEventListener("click", async () => {
+    const body = {
+      includeLocal: $("s-local").checked,
+      resolveNames: $("s-resolve").checked,
+      recon: $("s-recon").checked,
+      dedupSeconds: Number($("s-dedup").value) || 300,
+      retentionDays: Number($("s-retention").value) || 90,
+    };
+    try {
+      const r = await fetch("/api/settings", {
+        method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return;
+      const v = await r.json();           // server echoes clamped values
+      $("s-dedup").value = v.dedupSeconds;
+      $("s-retention").value = v.retentionDays;
+      const tag = $("s-saved");
+      tag.hidden = false;
+      setTimeout(() => { tag.hidden = true; }, 1800);
+      refresh();
+    } catch (e) { /* ignore */ }
+  });
+
+  // --- causal story ---
+  async function showStory(c) {
+    if (!c.hasStory) return;
+    try {
+      const st = await (await fetch("/api/story?id=" + encodeURIComponent(c.id))).json();
+      $("story-title").textContent = "Why " + shortImage(c.image) + " contacted " +
+        (c.domain || c.remoteIP);
+      $("story-sub").textContent = (c.asOrg ? c.asOrg + " · " : "") +
+        (c.country || "") + " · " + hostPort(c.remoteIP, c.remotePort);
+      $("story-chain").innerHTML = (st.steps || []).map(s =>
+        `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
+        (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
+        (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("");
+      $("story-modal").classList.add("show");
+    } catch (e) { /* ignore */ }
+  }
+  function stepLabel(kind) {
+    return ({ ProcStart: "Program started", ProcExit: "Program exited",
+      DNSQuery: "Looked up", NetConnect: "Connected to",
+      FileWrite: "Wrote file" })[kind] || kind;
+  }
+  $("story-close").addEventListener("click", () => $("story-modal").classList.remove("show"));
+  $("story-modal").addEventListener("click", (e) => {
+    if (e.target === $("story-modal")) $("story-modal").classList.remove("show");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") $("story-modal").classList.remove("show");
+  });
+
   async function refreshStatus() {
     try {
       const st = await (await fetch("/api/status")).json();

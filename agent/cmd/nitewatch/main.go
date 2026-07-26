@@ -30,6 +30,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/recon"
+	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
 )
 
@@ -75,22 +76,21 @@ func main() {
 		log.Printf("env: exe=%s", exe)
 	}
 
-	opts := collector.Options{
-		IncludeLocal: *includeLocal,
-		ResolveNames: !*noResolve,
-		ImageLookup:  platform.ProcessImage,
-	}
-	if !*noRecon {
-		opts.Recon = startRecon()
-	}
-	if err := run(*replayPath, *serve, *open, *dbPath, opts); err != nil {
+	// Flags seed first-run defaults; the dashboard owns configuration after that.
+	seed := settings.Defaults()
+	seed.IncludeLocal = *includeLocal
+	seed.ResolveNames = !*noResolve
+	seed.Recon = !*noRecon
+
+	opts := collector.Options{ImageLookup: platform.ProcessImage}
+	if err := run(*replayPath, *serve, *open, *dbPath, opts, seed); err != nil {
 		log.Printf("fatal: %v", err)
 		holdOpen()
 		os.Exit(1)
 	}
 }
 
-func run(replayPath string, serve, open bool, dbPath string, opts collector.Options) error {
+func run(replayPath string, serve, open bool, dbPath string, opts collector.Options, seed settings.Values) error {
 	if dir := filepath.Dir(dbPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create ledger dir %q: %w", dir, err)
@@ -104,13 +104,22 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	defer led.Close()
 	log.Printf("ledger: ready")
 
+	cfg, err := settings.Open(led.SQL(), seed)
+	if err != nil {
+		return fmt.Errorf("open settings: %w", err)
+	}
+	opts.Live = cfg
+	if cfg.Get().Recon {
+		opts.Recon = startRecon()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// Start the dashboard first so it is reachable even if the sensor can't start.
 	var srv *api.Server
 	if serve {
-		srv = api.New(led)
+		srv = api.New(led).WithSettings(cfg)
 		log.Printf("dashboard: http://%s", srv.Addr())
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {
@@ -154,7 +163,9 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 		})
 	}
 
-	log.Printf("options: include-local=%v resolve-names=%v", opts.IncludeLocal, opts.ResolveNames)
+	v := cfg.Get()
+	log.Printf("settings: include-local=%v resolve-names=%v recon=%v dedup=%ds (editable in the dashboard)",
+		v.IncludeLocal, v.ResolveNames, v.Recon, v.DedupSeconds)
 	coll := collector.NewWithOptions(src, led, opts)
 	collErr := make(chan error, 1)
 	go func() { collErr <- coll.Run(ctx) }()

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/settings"
 )
 
 //go:embed dashboard
@@ -23,8 +24,9 @@ var dashboardFS embed.FS
 const DefaultAddr = "127.0.0.1:8973"
 
 type Server struct {
-	ledger *ledger.DB
-	addr   string
+	ledger   *ledger.DB
+	settings *settings.Store
+	addr     string
 
 	mu     sync.RWMutex
 	status Status
@@ -40,6 +42,12 @@ type Status struct {
 
 func New(led *ledger.DB) *Server {
 	return &Server{ledger: led, addr: DefaultAddr}
+}
+
+// WithSettings enables the dashboard's configuration panel.
+func (s *Server) WithSettings(st *settings.Store) *Server {
+	s.settings = st
+	return s
 }
 
 // SetStatus updates the telemetry status shown to the dashboard.
@@ -68,6 +76,8 @@ type connectionDTO struct {
 	ASN        uint32    `json:"asn"`
 	ASOrg      string    `json:"asOrg"`
 	Country    string    `json:"country"`
+	ID         int64     `json:"id"`
+	HasStory   bool      `json:"hasStory"`
 }
 
 type talkerDTO struct {
@@ -81,6 +91,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/story", s.handleStory)
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -121,6 +133,7 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 			RemotePort: c.RemotePort, Proto: c.Proto, Domain: c.Domain, Verdict: c.Verdict,
 			IPVersion: ipVersion(c.RemoteIP), Inbound: c.Inbound,
 			ASN: c.ASN, ASOrg: c.ASOrg, Country: c.Country,
+			ID: c.ID, HasStory: c.Story != "",
 		})
 	}
 	writeJSON(w, out)
@@ -165,6 +178,52 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	st := s.status
 	s.mu.RUnlock()
 	writeJSON(w, st)
+}
+
+// handleSettings reads or updates the user-editable configuration.
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		http.Error(w, "settings unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, s.settings.Get())
+	case http.MethodPut, http.MethodPost:
+		var v settings.Values
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&v); err != nil {
+			http.Error(w, "invalid settings payload", http.StatusBadRequest)
+			return
+		}
+		if err := s.settings.Set(v); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, s.settings.Get()) // echo the sanitized result
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleStory returns the stored causal chain for one connection: the answer to
+// "why did this happen?", reconstructed from the GoRapide poset at record time.
+func (s *Server) handleStory(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid id", http.StatusBadRequest)
+		return
+	}
+	story, err := s.ledger.StoryFor(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if story == "" {
+		http.Error(w, "no story recorded for this connection", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write([]byte(story))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

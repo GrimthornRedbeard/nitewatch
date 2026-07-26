@@ -5,6 +5,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/event"
@@ -12,6 +13,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/resolve"
+	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
 )
 
@@ -31,6 +33,10 @@ type Options struct {
 	// saw start (i.e. everything already running when the agent launched).
 	// Injected so the collector stays platform-agnostic and testable.
 	ImageLookup func(pid uint32) string
+	// Live, if set, supersedes the static fields above: it is read on every
+	// connection so dashboard edits take effect without a restart (restarting
+	// would discard the live causal window).
+	Live *settings.Store
 	// DedupWindow collapses repeated activity on the same flow into one ledger
 	// row. The kernel reports network activity per packet, so without this a
 	// single browser tab produces hundreds of identical rows. Zero disables it.
@@ -85,9 +91,7 @@ func (c *Collector) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if c.opts.ResolveNames {
-		go c.backfillNames(ctx)
-	}
+	go c.backfillNames(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -113,19 +117,29 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 	// "External" means routable AND not on one of our own attached networks.
 	// The second half matters for IPv6, where LAN devices hold globally
 	// routable addresses from the ISP-delegated prefix.
-	if !c.opts.IncludeLocal && !c.localNets.IsExternal(peerIP) {
+	cfg := c.config()
+	if !cfg.IncludeLocal && !c.localNets.IsExternal(peerIP) {
 		return // loopback / LAN / link-local: not a phone-home, just noise
 	}
 	// Prefer the passively-observed name: it's what the program actually asked
 	// for. Fall back to reverse DNS only when there's no answer.
 	domain := c.window.Current().DomainFor(id)
-	if domain == "" && c.opts.ResolveNames {
+	if domain == "" && cfg.ResolveNames {
 		domain = c.resolver.Lookup(peerIP)
 	}
 
 	var info recon.Info
-	if c.opts.Recon != nil {
+	if c.opts.Recon != nil && cfg.Recon {
 		info = c.opts.Recon.Lookup(peerIP)
+	}
+
+	// Serialize the causal chain now: the live poset window is bounded, so the
+	// explanation must be captured while the ancestors still exist.
+	story := ""
+	if st := c.window.Current().StoryFor(id); len(st.Steps) > 0 {
+		if b, err := json.Marshal(st); err == nil {
+			story = string(b)
+		}
 	}
 
 	image := e.Image
@@ -148,7 +162,27 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		ASN:        info.ASN,
 		ASOrg:      info.Org,
 		Country:    info.Country,
-	}, c.opts.DedupWindow)
+		Story:      story,
+	}, c.dedupWindow())
+}
+
+// config returns the effective settings, preferring the live store.
+func (c *Collector) config() settings.Values {
+	if c.opts.Live != nil {
+		return c.opts.Live.Get()
+	}
+	return settings.Values{
+		IncludeLocal: c.opts.IncludeLocal,
+		ResolveNames: c.opts.ResolveNames,
+		Recon:        c.opts.Recon != nil,
+	}
+}
+
+func (c *Collector) dedupWindow() time.Duration {
+	if c.opts.Live != nil {
+		return c.opts.Live.DedupWindow()
+	}
+	return c.opts.DedupWindow
 }
 
 // backfillNames periodically attaches reverse-DNS names to rows that were
@@ -162,6 +196,9 @@ func (c *Collector) backfillNames(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if !c.config().ResolveNames {
+				continue
+			}
 			ips, err := c.ledger.UnnamedIPs(200)
 			if err != nil {
 				continue

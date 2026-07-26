@@ -34,6 +34,7 @@ func parseTS(s string) time.Time {
 // network activity per packet, many raw events collapse into a single row:
 // Time is first contact, LastSeen is most recent, Events counts the rollup.
 type Connection struct {
+	ID         int64
 	Time       time.Time
 	LastSeen   time.Time
 	Events     int
@@ -50,6 +51,11 @@ type Connection struct {
 	ASN     uint32
 	ASOrg   string
 	Country string
+
+	// Story is the causal chain that produced this connection, serialized from
+	// the poset at record time. Kept with the row because the live causal
+	// window is bounded — without this the explanation is lost when it rolls.
+	Story string
 }
 
 // DB wraps the SQLite handle.
@@ -72,6 +78,10 @@ func Open(path string) (*DB, error) {
 }
 
 func (d *DB) Close() error { return d.sql.Close() }
+
+// SQL exposes the underlying handle so sibling packages (settings) can share
+// one database file rather than opening a second one.
+func (d *DB) SQL() *sql.DB { return d.sql }
 
 // RecordConnection inserts one connection row. An empty Verdict defaults to
 // "clean" via the schema.
@@ -111,10 +121,11 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 				     inbound = CASE WHEN ? = 0 THEN 0 ELSE inbound END,
 				     asn     = CASE WHEN asn = 0 THEN ? ELSE asn END,
 				     as_org  = COALESCE(NULLIF(as_org, ''), ?),
-				     country = COALESCE(NULLIF(country, ''), ?)
+				     country = COALESCE(NULLIF(country, ''), ?),
+				     story   = COALESCE(NULLIF(story, ''), ?)
 				 WHERE id = ?`,
 				ts, nullable(c.Domain), c.Image, c.Inbound,
-				c.ASN, nullable(c.ASOrg), nullable(c.Country), id,
+				c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story), id,
 			)
 			return err
 		}
@@ -124,11 +135,11 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	}
 
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country)
-		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country, story)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
-		c.ASN, nullable(c.ASOrg), nullable(c.Country),
+		c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story),
 	)
 	return err
 }
@@ -138,7 +149,7 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	rows, err := d.sql.Query(
 		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
 		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound,
-		        asn, COALESCE(as_org, ''), COALESCE(country, '')
+		        asn, COALESCE(as_org, ''), COALESCE(country, ''), COALESCE(story, ''), id
 		 FROM connections ORDER BY last_seen DESC, id DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -152,7 +163,7 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		var ts, last string
 		if err := rows.Scan(&ts, &last, &c.Events, &c.PID, &c.Image, &c.RemoteIP,
 			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound,
-			&c.ASN, &c.ASOrg, &c.Country); err != nil {
+			&c.ASN, &c.ASOrg, &c.Country, &c.Story, &c.ID); err != nil {
 			return nil, err
 		}
 		c.Time = parseTS(ts)
@@ -199,6 +210,19 @@ func (d *DB) SetDomainForIP(ip, domain string) error {
 		domain, ip,
 	)
 	return err
+}
+
+// StoryFor returns the serialized causal chain stored with a connection.
+func (d *DB) StoryFor(id int64) (string, error) {
+	var story sql.NullString
+	err := d.sql.QueryRow(`SELECT story FROM connections WHERE id = ?`, id).Scan(&story)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return story.String, nil
 }
 
 // IsNewDestination reports whether this (image, domain) pair has never been
