@@ -74,6 +74,10 @@ func Open(path string) (*DB, error) {
 		h.Close()
 		return nil, err
 	}
+	if _, err := h.Exec(alertSchema); err != nil {
+		h.Close()
+		return nil, err
+	}
 	return &DB{sql: h}, nil
 }
 
@@ -210,6 +214,20 @@ func (d *DB) SetDomainForIP(ip, domain string) error {
 		domain, ip,
 	)
 	return err
+}
+
+// ConnectionID returns the id of the most recent row for a flow, so an alert
+// can anchor to the connection that triggered it.
+func (d *DB) ConnectionID(pid uint32, ip string, port uint16, proto string) (int64, error) {
+	var id int64
+	err := d.sql.QueryRow(
+		`SELECT id FROM connections
+		 WHERE pid = ? AND remote_ip = ? AND remote_port = ? AND proto = ?
+		 ORDER BY id DESC LIMIT 1`, pid, ip, port, proto).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
 }
 
 // StoryFor returns the serialized causal chain stored with a connection.

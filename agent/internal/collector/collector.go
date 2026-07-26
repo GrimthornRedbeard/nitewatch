@@ -6,8 +6,12 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"time"
 
+	gr "github.com/ShaneDolphin/gorapide"
+
+	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/event"
 	"github.com/threattape/nitewatch/agent/internal/graph"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
@@ -33,6 +37,8 @@ type Options struct {
 	// saw start (i.e. everything already running when the agent launched).
 	// Injected so the collector stays platform-agnostic and testable.
 	ImageLookup func(pid uint32) string
+	// Detect, if set, evaluates rules against each recorded connection.
+	Detect *detect.Engine
 	// Live, if set, supersedes the static fields above: it is read on every
 	// connection so dashboard edits take effect without a restart (restarting
 	// would discard the live causal window).
@@ -58,6 +64,10 @@ type Collector struct {
 	opts      Options
 
 	imageCache map[uint32]string
+
+	// per-ingest scratch, set before detection runs
+	lastID       gr.EventID
+	firstContact bool
 }
 
 // New builds a collector with default options (skip local traffic, resolve names).
@@ -128,6 +138,9 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		domain = c.resolver.Lookup(peerIP)
 	}
 
+	c.lastID = id
+	c.firstContact = c.ledger.IsNewDestination(imageFor(e, c), domainOrIP(domain, peerIP))
+
 	var info recon.Info
 	if c.opts.Recon != nil && cfg.Recon {
 		info = c.opts.Recon.Lookup(peerIP)
@@ -150,7 +163,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		image = c.lookupImage(e.PID)
 	}
 
-	_ = c.ledger.RecordConnectionDedup(ledger.Connection{
+	conn := ledger.Connection{
 		Time:       e.Time,
 		PID:        e.PID,
 		Image:      image,
@@ -163,7 +176,65 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		ASOrg:      info.Org,
 		Country:    info.Country,
 		Story:      story,
-	}, c.dedupWindow())
+	}
+	_ = c.ledger.RecordConnectionDedup(conn, c.dedupWindow())
+
+	if c.opts.Detect != nil {
+		c.runDetections(e, conn, info, domain)
+	}
+}
+
+// runDetections evaluates rules against a just-recorded connection and persists
+// any alerts. Detection never blocks or fails ingestion: a rule engine problem
+// must not cost us the flight recorder.
+func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connection, info recon.Info, domain string) {
+	// The connection row is the alert's anchor, so resolve its id first.
+	id, err := c.ledger.ConnectionID(conn.PID, conn.RemoteIP, conn.RemotePort, conn.Proto)
+	if err != nil || id == 0 {
+		return
+	}
+	subject := detect.Subject{
+		Event:        e,
+		Conn:         conn,
+		Recon:        info,
+		Domain:       domain,
+		HadDNS:       c.window.Current().DomainFor(c.lastID) != "",
+		FirstContact: c.firstContact,
+	}
+	for _, d := range c.opts.Detect.Evaluate(subject) {
+		created, err := c.ledger.RecordAlert(ledger.Alert{
+			Time:      e.Time,
+			RuleID:    d.Rule.ID,
+			Area:      string(d.Rule.Area),
+			Severity:  string(d.Rule.Severity),
+			Title:     d.Rule.RenderTitle(d.Fields),
+			Narrative: d.Rule.RenderNarrative(d.Fields),
+			Playbook:  d.Rule.RenderPlaybook(d.Fields),
+			ConnID:    id,
+			Evidence:  d.Fields,
+		})
+		if err == nil && created {
+			log.Printf("ALERT [%s] %s", d.Rule.Severity, d.Rule.RenderTitle(d.Fields))
+		}
+	}
+}
+
+// imageFor resolves the acting image the same way the ledger row does.
+func imageFor(e event.NormalizedEvent, c *Collector) string {
+	if e.Image != "" {
+		return e.Image
+	}
+	if img := c.window.Current().ImageFor(e.PID); img != "" {
+		return img
+	}
+	return c.lookupImage(e.PID)
+}
+
+func domainOrIP(domain, ip string) string {
+	if domain != "" {
+		return domain
+	}
+	return ip
 }
 
 // config returns the effective settings, preferring the live store.

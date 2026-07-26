@@ -93,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/story", s.handleStory)
+	mux.HandleFunc("/api/alerts", s.handleAlerts)
+	mux.HandleFunc("/api/alerts/ack", s.handleAckAlert)
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -224,6 +226,64 @@ func (s *Server) handleStory(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write([]byte(story))
+}
+
+type alertDTO struct {
+	ID        int64          `json:"id"`
+	Time      time.Time      `json:"time"`
+	RuleID    string         `json:"ruleId"`
+	Area      string         `json:"area"`
+	Severity  string         `json:"severity"`
+	Title     string         `json:"title"`
+	Narrative string         `json:"narrative"`
+	Playbook  []string       `json:"playbook"`
+	ConnID    int64          `json:"connId"`
+	Evidence  map[string]any `json:"evidence"`
+	Status    string         `json:"status"`
+}
+
+func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	rows, err := s.ledger.RecentAlerts(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := make([]alertDTO, 0, len(rows))
+	for _, a := range rows {
+		pb := a.Playbook
+		if pb == nil {
+			pb = []string{}
+		}
+		out = append(out, alertDTO{
+			ID: a.ID, Time: a.Time, RuleID: a.RuleID, Area: a.Area,
+			Severity: a.Severity, Title: a.Title, Narrative: a.Narrative,
+			Playbook: pb, ConnID: a.ConnID, Evidence: a.Evidence, Status: a.Status,
+		})
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) handleAckAlert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "missing or invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := s.ledger.AckAlert(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

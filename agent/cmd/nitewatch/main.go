@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
 	"fmt"
 	"io"
@@ -27,9 +28,12 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/api"
 	"github.com/threattape/nitewatch/agent/internal/collector"
+	"github.com/threattape/nitewatch/agent/internal/detect"
+	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/recon"
+	"github.com/threattape/nitewatch/agent/internal/rules"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
 )
@@ -55,6 +59,8 @@ func main() {
 		includeLocal = flag.Bool("include-local", false, "also record loopback/private/link-local destinations (noisy)")
 		noResolve    = flag.Bool("no-resolve", false, "disable reverse-DNS lookup of destinations")
 		noRecon      = flag.Bool("no-recon", false, "disable the offline IP-ownership dataset (no download)")
+		noFeeds      = flag.Bool("no-feeds", false, "disable threat-intel feed downloads (rules still run)")
+		rulesDir     = flag.String("rules", "", "load rule packs from this directory instead of the built-in set")
 	)
 	flag.Parse()
 
@@ -83,6 +89,9 @@ func main() {
 	seed.Recon = !*noRecon
 
 	opts := collector.Options{ImageLookup: platform.ProcessImage}
+	if eng := startDetection(*rulesDir, *noFeeds); eng != nil {
+		opts.Detect = eng
+	}
 	if err := run(*replayPath, *serve, *open, *dbPath, opts, seed); err != nil {
 		log.Printf("fatal: %v", err)
 		holdOpen()
@@ -180,6 +189,73 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 		return err
 	}
 	return nil
+}
+
+//go:embed all:rules
+var builtinRules embed.FS
+
+// startDetection loads rule packs and (unless disabled) threat feeds. Detection
+// is optional: a pack that fails to load must not stop the flight recorder,
+// which is useful on its own.
+func startDetection(rulesDir string, noFeeds bool) *detect.Engine {
+	var packs []*rules.Pack
+	load := func(name string, data []byte) {
+		p, err := rules.LoadPack(data)
+		if err != nil {
+			log.Printf("rules: %s failed to load: %v", name, err)
+			return
+		}
+		packs = append(packs, p)
+		log.Printf("rules: loaded %s (%d rules)", name, len(p.Rules))
+	}
+
+	if rulesDir != "" {
+		entries, err := os.ReadDir(rulesDir)
+		if err != nil {
+			log.Printf("rules: cannot read %s: %v", rulesDir, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(rulesDir, e.Name()))
+			if err != nil {
+				continue
+			}
+			load(e.Name(), data)
+		}
+	} else {
+		entries, _ := builtinRules.ReadDir("rules")
+		for _, e := range entries {
+			if filepath.Ext(e.Name()) != ".yaml" {
+				continue
+			}
+			data, err := builtinRules.ReadFile("rules/" + e.Name())
+			if err != nil {
+				continue
+			}
+			load(e.Name(), data)
+		}
+	}
+	if len(packs) == 0 {
+		log.Print("rules: no packs loaded; detection disabled")
+		return nil
+	}
+
+	var feeds *intel.Store
+	if !noFeeds {
+		feeds = intel.New()
+		go func() {
+			ctx := context.Background()
+			dir := filepath.Join(baseDir(), "feeds")
+			if err := feeds.EnsureLoaded(ctx, dir, intel.DefaultSources); err != nil {
+				log.Printf("intel: %v (feed-based rules will not fire)", err)
+				return
+			}
+			feeds.RefreshLoop(ctx, dir, intel.DefaultSources)
+		}()
+	}
+	return detect.New(rules.NewSet(packs...), feeds)
 }
 
 // startRecon loads the offline address-ownership dataset in the background.

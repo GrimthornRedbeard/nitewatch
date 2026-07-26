@@ -86,6 +86,24 @@
   .chain .k { font-weight: 600; }
   .chain .s { color: var(--accent); }
   .chain .d { color: var(--muted); font-size: 12px; }
+  .alerts { margin-bottom: 20px; }
+  .alert { border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px;
+    background: var(--panel); padding: 13px 16px; margin-bottom: 10px; }
+  .alert.critical { border-left-color: #ff5f5f; }
+  .alert.high     { border-left-color: #ff9f43; }
+  .alert.medium   { border-left-color: #ffcf5c; }
+  .alert.low      { border-left-color: #6b7a90; }
+  .alert h3 { margin: 0 0 6px; font-size: 14px; }
+  .alert .sev { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .6px;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 4px; margin-right: 8px;
+    background: #2a2f3d; color: var(--muted); vertical-align: 2px; }
+  .alert.critical .sev { background: #4a1414; color: #ff8f8f; }
+  .alert.high .sev     { background: #45280c; color: #ffb87a; }
+  .alert p { margin: 0 0 10px; color: #cfd6e4; font-size: 13px; white-space: pre-wrap; }
+  .alert ol { margin: 0; padding-left: 20px; color: #cfd6e4; font-size: 13px; }
+  .alert ol li { margin-bottom: 4px; }
+  .alert .act { margin-top: 10px; }
+  .alert.acked { opacity: .55; }
   .why { color: var(--muted); font-size: 12px; margin-top: 16px;
     border-top: 1px solid var(--line); padding-top: 12px; }
 </style>
@@ -131,6 +149,7 @@
       <button class="btn" id="s-save">Save</button><span class="saved" id="s-saved" hidden>Saved</span>
     </div>
   </div>
+  <div class="alerts" id="alerts"></div>
   <div class="cards">
     <div class="card"><div class="n" id="c-total">–</div><div class="l">Connections</div></div>
     <div class="card"><div class="n" id="c-talkers">–</div><div class="l">Processes</div></div>
@@ -369,7 +388,34 @@
       }
     } catch (e) { /* ignore */ }
   }
+  function alertHTML(a) {
+    const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
+    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}">
+      <h3><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
+      <p>${esc(a.narrative)}</p>
+      ${steps ? `<ol>${steps}</ol>` : ""}
+      <div class="act">
+        <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
+      </div>
+    </div>`;
+  }
+  async function refreshAlerts() {
+    try {
+      const list = await (await fetch("/api/alerts?limit=50")).json() || [];
+      const box = $("alerts");
+      const open = list.filter(a => a.status !== "acknowledged");
+      box.innerHTML = open.map(alertHTML).join("");
+      box.querySelectorAll("[data-ack]").forEach(b => {
+        b.addEventListener("click", async () => {
+          await fetch("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack), {method: "POST"});
+          refreshAlerts();
+        });
+      });
+      document.title = open.length ? `(${open.length}) NiteWatch` : "NiteWatch — Who's Talking?";
+    } catch (e) { /* ignore */ }
+  }
   async function refresh() {
+    refreshAlerts();
     try {
       const r = await fetch("/api/connections?limit=1000");
       all = await r.json() || [];
