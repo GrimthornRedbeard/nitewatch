@@ -37,11 +37,12 @@ type Options struct {
 const DefaultDedupWindow = 5 * time.Minute
 
 type Collector struct {
-	src      source.EventSource
-	window   *graph.Window
-	ledger   *ledger.DB
-	resolver *resolve.Resolver
-	opts     Options
+	src       source.EventSource
+	window    *graph.Window
+	ledger    *ledger.DB
+	resolver  *resolve.Resolver
+	localNets *resolve.LocalNets
+	opts      Options
 
 	imageCache map[uint32]string
 }
@@ -58,6 +59,7 @@ func NewWithOptions(src source.EventSource, led *ledger.DB, opts Options) *Colle
 		window:     graph.NewWindow(graph.WindowConfig{}),
 		ledger:     led,
 		resolver:   resolve.New(),
+		localNets:  resolve.DetectLocalNets(),
 		opts:       opts,
 		imageCache: make(map[uint32]string),
 	}
@@ -68,6 +70,9 @@ func (c *Collector) Run(ctx context.Context) error {
 	ch, err := c.src.Events(ctx)
 	if err != nil {
 		return err
+	}
+	if c.opts.ResolveNames {
+		go c.backfillNames(ctx)
 	}
 	for {
 		select {
@@ -87,15 +92,21 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 	if e.Kind != event.KindNetConnect {
 		return
 	}
-	if !c.opts.IncludeLocal && !resolve.IsPublic(e.RemoteIP) {
-		return // loopback/private/link-local: not a phone-home, just noise
+	peerIP, peerPort, inbound := c.peer(e)
+	if peerIP == "" {
+		return
 	}
-
+	// "External" means routable AND not on one of our own attached networks.
+	// The second half matters for IPv6, where LAN devices hold globally
+	// routable addresses from the ISP-delegated prefix.
+	if !c.opts.IncludeLocal && !c.localNets.IsExternal(peerIP) {
+		return // loopback / LAN / link-local: not a phone-home, just noise
+	}
 	// Prefer the passively-observed name: it's what the program actually asked
 	// for. Fall back to reverse DNS only when there's no answer.
 	domain := c.window.Current().DomainFor(id)
 	if domain == "" && c.opts.ResolveNames {
-		domain = c.resolver.Lookup(e.RemoteIP)
+		domain = c.resolver.Lookup(peerIP)
 	}
 
 	image := e.Image
@@ -110,11 +121,59 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		Time:       e.Time,
 		PID:        e.PID,
 		Image:      image,
-		RemoteIP:   e.RemoteIP,
-		RemotePort: e.RemotePort,
+		RemoteIP:   peerIP,
+		RemotePort: peerPort,
 		Proto:      e.Proto,
 		Domain:     domain,
+		Inbound:    inbound,
 	}, c.opts.DedupWindow)
+}
+
+// backfillNames periodically attaches reverse-DNS names to rows that were
+// written before their lookup completed. Without this, a short-lived flow whose
+// packets all land before the resolver answers would stay nameless forever.
+func (c *Collector) backfillNames(ctx context.Context) {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			ips, err := c.ledger.UnnamedIPs(200)
+			if err != nil {
+				continue
+			}
+			for _, ip := range ips {
+				// Lookup is async: this both consumes a completed answer and
+				// primes the cache for the next pass.
+				if name := c.resolver.Lookup(ip); name != "" {
+					_ = c.ledger.SetDomainForIP(ip, name)
+				}
+			}
+		}
+	}
+}
+
+// peer determines which end of a network event is the remote party.
+//
+// The kernel reports addresses relative to the packet, so on a receive event
+// the "destination" is this machine. Choosing blindly makes the agent record
+// the user's own address as the peer it is talking to. The peer is whichever
+// end is not one of our own addresses.
+func (c *Collector) peer(e event.NormalizedEvent) (ip string, port uint16, inbound bool) {
+	dstMine := e.RemoteIP != "" && c.localNets.IsLocal(e.RemoteIP)
+	srcMine := e.SrcIP != "" && c.localNets.IsLocal(e.SrcIP)
+
+	switch {
+	case dstMine && !srcMine && e.SrcIP != "":
+		// Traffic arriving at us: the source is the remote party.
+		return e.SrcIP, e.SrcPort, true
+	case e.RemoteIP != "":
+		return e.RemoteIP, e.RemotePort, e.Inbound
+	default:
+		return e.SrcIP, e.SrcPort, true
+	}
 }
 
 // lookupImage resolves and caches a PID's image path via the injected lookup.

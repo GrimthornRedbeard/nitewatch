@@ -28,6 +28,7 @@ type Connection struct {
 	Proto      string
 	Domain     string
 	Verdict    string
+	Inbound    bool
 }
 
 // DB wraps the SQLite handle.
@@ -97,10 +98,10 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 	}
 
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict)
-		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, ts, c.PID, c.Image, c.RemoteIP,
-		c.RemotePort, c.Proto, nullable(c.Domain), verdict,
+		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
 	)
 	return err
 }
@@ -109,7 +110,7 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	rows, err := d.sql.Query(
 		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
-		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict
+		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound
 		 FROM connections ORDER BY last_seen DESC, id DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -122,7 +123,7 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		var c Connection
 		var ts, last string
 		if err := rows.Scan(&ts, &last, &c.Events, &c.PID, &c.Image, &c.RemoteIP,
-			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict); err != nil {
+			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound); err != nil {
 			return nil, err
 		}
 		c.Time, _ = time.Parse(time.RFC3339Nano, ts)
@@ -130,6 +131,45 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// UnnamedIPs returns distinct remote addresses among recent rows that still
+// have no name, so a background pass can try to resolve them.
+func (d *DB) UnnamedIPs(limit int) ([]string, error) {
+	rows, err := d.sql.Query(
+		`SELECT DISTINCT remote_ip FROM connections
+		 WHERE domain IS NULL OR domain = ''
+		 ORDER BY last_seen DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return nil, err
+		}
+		out = append(out, ip)
+	}
+	return out, rows.Err()
+}
+
+// SetDomainForIP names every unnamed row for an address. Reverse DNS resolves
+// asynchronously, so a flow's packets often finish before the answer arrives;
+// this attaches the name once it does.
+func (d *DB) SetDomainForIP(ip, domain string) error {
+	if ip == "" || domain == "" {
+		return nil
+	}
+	_, err := d.sql.Exec(
+		`UPDATE connections SET domain = ?
+		 WHERE remote_ip = ? AND (domain IS NULL OR domain = '')`,
+		domain, ip,
+	)
+	return err
 }
 
 // IsNewDestination reports whether this (image, domain) pair has never been

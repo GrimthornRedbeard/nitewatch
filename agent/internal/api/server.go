@@ -64,6 +64,7 @@ type connectionDTO struct {
 	Domain     string    `json:"domain"`
 	Verdict    string    `json:"verdict"`
 	IPVersion  int       `json:"ipVersion"` // 4 or 6, for client-side filtering
+	Inbound    bool      `json:"inbound"`
 }
 
 type talkerDTO struct {
@@ -115,7 +116,7 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 			Time: c.Time, LastSeen: c.LastSeen, Events: c.Events,
 			PID: c.PID, Image: c.Image, RemoteIP: c.RemoteIP,
 			RemotePort: c.RemotePort, Proto: c.Proto, Domain: c.Domain, Verdict: c.Verdict,
-			IPVersion: ipVersion(c.RemoteIP),
+			IPVersion: ipVersion(c.RemoteIP), Inbound: c.Inbound,
 		})
 	}
 	writeJSON(w, out)

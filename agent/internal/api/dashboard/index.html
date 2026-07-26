@@ -70,7 +70,8 @@
   <table>
     <thead><tr>
       <th>Last seen</th><th>Process</th><th>Destination</th><th>IP:Port</th>
-      <th>Proto</th><th title="Network events collapsed into this connection">Activity</th>
+      <th>Proto</th><th title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
+      <th title="Network events collapsed into this connection">Activity</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -126,6 +127,7 @@
         dest +
         `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
         `<td>${esc(c.proto)}</td>` +
+        `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
         `<td class="num">${esc(c.events || 1)}</td>`;
       tb.appendChild(tr);
     }

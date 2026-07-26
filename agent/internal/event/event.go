@@ -30,10 +30,16 @@ type NormalizedEvent struct {
 	PPID  uint32    `json:"ppid,omitempty"`  // ProcStart only
 	Image string    `json:"image,omitempty"` // full path to the acting process image
 
-	// Network (NetConnect):
+	// Network (NetConnect). The kernel reports source/destination relative to
+	// the packet, so on inbound traffic the "destination" is the LOCAL host.
+	// Sources fill both ends as reported; the collector decides which is the
+	// remote peer (whichever is not one of this machine's own addresses).
+	SrcIP      string `json:"srcIP,omitempty"`
+	SrcPort    uint16 `json:"srcPort,omitempty"`
 	RemoteIP   string `json:"remoteIP,omitempty"`
 	RemotePort uint16 `json:"remotePort,omitempty"`
 	Proto      string `json:"proto,omitempty"` // "TCP"/"UDP"
+	Inbound    bool   `json:"inbound,omitempty"`
 
 	// DNS (DNSQuery):
 	QueryName string   `json:"queryName,omitempty"`

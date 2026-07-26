@@ -2,6 +2,7 @@ package source
 
 import (
 	"net"
+	"regexp"
 	"strings"
 )
 
@@ -41,6 +42,30 @@ func normalizeIP(s string) string {
 		return v4.String()
 	}
 	return ip.String()
+}
+
+// deviceVolumePrefix matches the NT device path form ETW reports for images,
+// e.g. `\Device\HarddiskVolume3\Program Files\...`.
+var deviceVolumeRe = regexp.MustCompile(`^\\Device\\HarddiskVolume(\d+)\\`)
+
+// normalizeImagePath converts an NT device path into a conventional drive path
+// so the UI shows `C:\Program Files\...` rather than
+// `\Device\HarddiskVolume3\Program Files\...`.
+//
+// Volume-number-to-drive-letter mapping is not knowable from the path alone;
+// HarddiskVolume3 is the Windows system volume in the overwhelming majority of
+// installs, so it maps to C:. Other volumes keep a readable `Volume<N>:` form
+// rather than pretending to a letter we cannot verify.
+func normalizeImagePath(p string) string {
+	m := deviceVolumeRe.FindStringSubmatch(p)
+	if m == nil {
+		return p
+	}
+	rest := p[len(m[0]):]
+	if m[1] == "3" {
+		return `C:\` + rest
+	}
+	return `Volume` + m[1] + `:\` + rest
 }
 
 // FormatHostPort renders an address:port pair, bracketing IPv6 so the result is

@@ -214,7 +214,7 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 			ne.Kind = event.KindProcStart
 			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")
 			ne.PPID = u32(e.EventData, 0, "ParentProcessID", "ParentPID")
-			ne.Image = str(e.EventData, "ImageName", "ImagePath", "ProcessName")
+			ne.Image = normalizeImagePath(str(e.EventData, "ImageName", "ImagePath", "ProcessName"))
 		case "End":
 			ne.Kind = event.KindProcExit
 			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")
@@ -224,14 +224,20 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 	case "Microsoft-Windows-Kernel-Network":
 		ne.Kind = event.KindNetConnect
 		// The acting process is in the payload ("PID"), NOT the execution
-		// context — Kernel-Network events are often reported from a system
-		// thread, which is why execution ProcessID yields the wrong owner.
+		// context — these events are frequently reported from a system thread
+		// (execPID 4), which is why the execution ProcessID names the wrong
+		// owner.
 		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
+		// Report both ends verbatim. saddr/daddr are packet-relative: on a
+		// receive event daddr is the LOCAL host, so picking daddr blindly
+		// records this machine as its own peer. The collector resolves it.
+		ne.SrcIP = str(e.EventData, "saddr", "SourceIp", "SourceAddress")
+		ne.SrcPort = u16(e.EventData, 0, "sport", "SourcePort")
 		ne.RemoteIP = str(e.EventData, "daddr", "DestinationIp", "DestAddr", "RemoteAddress")
 		ne.RemotePort = u16(e.EventData, 0, "dport", "DestinationPort", "DestPort", "RemotePort")
 		ne.Proto = netProto(e)
-		if ne.RemoteIP == "" {
-			return ne, false // nothing useful without a destination
+		if ne.RemoteIP == "" && ne.SrcIP == "" {
+			return ne, false // nothing useful without an address
 		}
 	case "Microsoft-Windows-DNS-Client", "Microsoft-Windows-DNS-Client-Operational":
 		ne.Kind = event.KindDNSQuery
