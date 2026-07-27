@@ -4,11 +4,13 @@
 *.test
 *.out
 /agent/bin/
-
-# Node / SvelteKit
-node_modules/
-/dashboard/.svelte-kit/
-/dashboard/build/
+# Build output. Two dist dirs exist in practice (agent/dist from the in-tree
+# build, dist/ from `go build -o ../dist`); ignore both rather than let a
+# 14 MB binary land in a commit.
+dist/
+# Runtime log — main.go appends on every run, so a tracked copy shows the
+# tree perpetually dirty.
+*.log
 
 # Local state
 *.db
@@ -22,7 +24,6 @@ node_modules/
 Thumbs.db
 .DS_Store
 nitewatch
-nitewatch.log
 nitewatch.db
 feeds/
 quarantine/

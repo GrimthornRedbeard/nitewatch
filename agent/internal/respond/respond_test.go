@@ -153,3 +153,118 @@ func TestValidateUndoRejectsUnUndoableKinds(t *testing.T) {
 		t.Fatal("killing a process is not reversible and must be refused")
 	}
 }
+
+// A playbook that says "the button below" must be accompanied by a button.
+//
+// This is the regression this test exists for: Suggest handled only "c2" and
+// "persistence", so all three ransomware rules and the credential-theft rule
+// rendered with an empty action row while their own text told the reader to
+// press something. The critical ransomware alert — the one where seconds
+// matter — was the worst case. Pointing someone at a control that is not there
+// is the exact "confident wrongness" this product is built to avoid.
+//
+// The areas and severities below mirror agent/rules/*.yaml. If a new pack adds
+// a "button below" playbook step for a new area, add it here too.
+func TestEveryAreaPromisingAButtonProvidesOne(t *testing.T) {
+	// Evidence as the ledger actually returns it: numbers have round-tripped
+	// through JSON, so PID arrives as float64, not uint32.
+	evidence := func(extra map[string]any) map[string]any {
+		ev := map[string]any{
+			"ImagePath":   `C:\Users\kevin\Downloads\invoice.exe`,
+			"ProcessName": "invoice.exe",
+			"PID":         float64(300),
+		}
+		for k, v := range extra {
+			ev[k] = v
+		}
+		return ev
+	}
+
+	cases := []struct {
+		area     string
+		severity string
+		ev       map[string]any
+		wantKind Kind // the action the playbook text specifically promises
+	}{
+		{"ransomware", "critical", evidence(nil), KillProcess},
+		{"ransomware", "high", evidence(nil), KillProcess},
+		{"credentials", "critical", evidence(map[string]any{
+			"SecretPath": `C:\Users\kevin\AppData\Local\BrowserCo\Login Data`,
+		}), KillProcess},
+		{"c2", "critical", evidence(map[string]any{"RemoteIP": "185.4.3.2"}), KillProcess},
+		{"persistence", "high", evidence(map[string]any{
+			"Location": `HKCU\...\Run`, "EntryName": "Updater",
+		}), RemoveAutostart},
+	}
+
+	for _, c := range cases {
+		acts := Suggest(c.area, c.severity, c.ev)
+		if len(acts) == 0 {
+			t.Errorf("%s/%s: no actions offered, but the playbook tells the user to press a button",
+				c.area, c.severity)
+			continue
+		}
+		var found bool
+		for _, a := range acts {
+			if a.Kind == c.wantKind {
+				found = true
+			}
+			if a.Label == "" || a.Detail == "" {
+				t.Errorf("%s/%s: action %v has empty label or detail", c.area, c.severity, a.Kind)
+			}
+		}
+		if !found {
+			t.Errorf("%s/%s: offered %v, want one of kind %v", c.area, c.severity, kinds(acts), c.wantKind)
+		}
+	}
+}
+
+// Stopping the thing must be offered before destroying it — the ordering is
+// the safety property, not a cosmetic one.
+func TestRansomwareOffersStopBeforeQuarantine(t *testing.T) {
+	acts := Suggest("ransomware", "critical", map[string]any{
+		"ImagePath": `C:\x\bad.exe`, "ProcessName": "bad.exe", "PID": float64(42),
+	})
+	var killAt, quarAt = -1, -1
+	for i, a := range acts {
+		switch a.Kind {
+		case KillProcess:
+			killAt = i
+		case QuarantineFile:
+			quarAt = i
+		}
+	}
+	if killAt < 0 || quarAt < 0 {
+		t.Fatalf("want both stop and quarantine, got %v", kinds(acts))
+	}
+	if killAt > quarAt {
+		t.Errorf("quarantine offered before stopping the process: %v", kinds(acts))
+	}
+}
+
+// The PID must survive the JSON round-trip as an integer. Formatted with %v a
+// float64 PID above ~1e6 becomes "1.234568e+06", which taskkill rejects —
+// silently breaking the one button that stops active ransomware on a machine
+// with long uptime.
+func TestLargePIDIsNotFormattedAsExponent(t *testing.T) {
+	acts := Suggest("ransomware", "critical", map[string]any{
+		"ImagePath": `C:\x\bad.exe`, "ProcessName": "bad.exe", "PID": float64(1234568),
+	})
+	for _, a := range acts {
+		if a.Kind == KillProcess {
+			if got := a.Params["pid"]; got != "1234568" {
+				t.Errorf("pid = %q, want \"1234568\"", got)
+			}
+			return
+		}
+	}
+	t.Fatal("no stop action offered")
+}
+
+func kinds(as []Action) []Kind {
+	out := make([]Kind, 0, len(as))
+	for _, a := range as {
+		out = append(out, a.Kind)
+	}
+	return out
+}
