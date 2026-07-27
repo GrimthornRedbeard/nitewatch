@@ -123,6 +123,20 @@ specifically.
   repeated clicks do not repeat the disclosure. The endpoint is POST-only and
   guarded like a state change, so a link or an image cannot trigger it.
   Verified by `TestNoRouteQueriesTheRegistryOnItsOwn`.
+- **The VirusTotal check is a second per-file query, and the user makes it.**
+  Off unless the user supplies their own API key, so the account doing the
+  asking is theirs. It sends one SHA-256 — no file, no filename, no path,
+  nothing else about the machine. Three honest caveats, all stated in the UI:
+  for common software the query reveals essentially nothing; for a file that
+  exists nowhere else the hash is close to an identifier; and VirusTotal's paid
+  tiers let customers see who looks up hashes they care about, so in a targeted
+  intrusion querying an implant can tip off the intruder. Never automatic;
+  verified by a test that watches an idle dashboard make zero such calls.
+- **Engine counts are evidence, not proof.** Zero detections is not safety —
+  new malware is missed by everyone on its first day. One or two detections is
+  usually a false positive. The wording around the numbers says so, and is
+  under test, because a raw "3/72" misleads in both directions.
+
 - **Registration data says who holds an address, not whether it is safe.** A
   recently registered domain is a useful signal, not a verdict; plenty of new
   domains are ordinary and plenty of malicious traffic runs on old, reputable

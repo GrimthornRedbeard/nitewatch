@@ -13,6 +13,7 @@ package settings
 import (
 	"database/sql"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,6 +31,10 @@ type Values struct {
 	DedupSeconds int `json:"dedupSeconds"`
 	// RetentionDays bounds how long connection history is kept.
 	RetentionDays int `json:"retentionDays"`
+	// VirusTotalKey enables the optional reputation check on a program's
+	// fingerprint. Empty by default: the feature does not exist until the user
+	// supplies their own key, so the account doing the asking is theirs.
+	VirusTotalKey string `json:"virusTotalKey"`
 }
 
 // Defaults are the shipped configuration.
@@ -115,6 +120,7 @@ func (s *Store) persist(v Values) error {
 		"recon":         b2s(v.Recon),
 		"dedupSeconds":  strconv.Itoa(v.DedupSeconds),
 		"retentionDays": strconv.Itoa(v.RetentionDays),
+		"virusTotalKey": strings.TrimSpace(v.VirusTotalKey),
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)
@@ -146,6 +152,9 @@ func merge(base Values, stored map[string]string) Values {
 		if n, err := strconv.Atoi(v); err == nil {
 			out.RetentionDays = n
 		}
+	}
+	if v, ok := stored["virusTotalKey"]; ok {
+		out.VirusTotalKey = v
 	}
 	return sanitize(out)
 }

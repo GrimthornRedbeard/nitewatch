@@ -316,6 +316,15 @@
         <div class="d">How long connection history is retained.</div></div>
       <div class="ctl"><input type="number" id="s-retention" min="1" max="3650"></div>
     </div>
+    <div class="opt">
+      <div><label for="s-vtkey">VirusTotal key (optional)</label>
+        <div class="d">Switches on "Check against antivirus engines" in the program view.
+          Get a free key at virustotal.com. Without one, that check does not appear.
+          <b>Stored on this machine only, and never shown again once saved.</b></div></div>
+      <div class="ctl"><input type="password" id="s-vtkey" placeholder="not set"
+        autocomplete="off" style="width:220px;padding:9px 11px;background:var(--bg);
+        border:1px solid var(--line);border-radius:8px;color:var(--fg);font:500 14px var(--sans)"></div>
+    </div>
     <div style="margin-top:14px">
       <button class="btn" id="s-save">Save</button><span class="saved" id="s-saved" hidden>Saved</span>
     </div>
@@ -428,6 +437,7 @@
 
 <script>
   let all = [];
+  let VT_KEY_SET = false;
   const $ = (id) => document.getElementById(id);
 
   // Mutating endpoints require this header; it is what stops another site's
@@ -643,6 +653,10 @@
       $("s-recon").checked = !!v.recon;
       $("s-dedup").value = v.dedupSeconds;
       $("s-retention").value = v.retentionDays;
+      // The key itself is never sent back, only whether one exists.
+      VT_KEY_SET = !!v.virusTotalKeySet;
+      $("s-vtkey").placeholder = VT_KEY_SET ? "saved — type to replace" : "not set";
+      $("s-vtkey").value = "";
     } catch (e) { /* panel stays as-is */ }
   }
   $("s-save").addEventListener("click", async () => {
@@ -652,6 +666,9 @@
       recon: $("s-recon").checked,
       dedupSeconds: Number($("s-dedup").value) || 300,
       retentionDays: Number($("s-retention").value) || 90,
+      // Blank means "leave it alone" — the server never handed us the real one
+      // to send back, so blanking it must not wipe it.
+      virusTotalKey: $("s-vtkey").value.trim(),
     };
     try {
       const r = await fetch("/api/settings", {
@@ -663,6 +680,9 @@
       const v = await r.json();           // server echoes clamped values
       $("s-dedup").value = v.dedupSeconds;
       $("s-retention").value = v.retentionDays;
+      VT_KEY_SET = !!v.virusTotalKeySet;
+      $("s-vtkey").value = "";
+      $("s-vtkey").placeholder = VT_KEY_SET ? "saved — type to replace" : "not set";
       const tag = $("s-saved");
       tag.hidden = false;
       setTimeout(() => { tag.hidden = true; }, 1800);
@@ -819,7 +839,72 @@
     out.innerHTML = `<div class="res">` + verdict +
       (rows.length ? `<dl>${rows.map(([k, v]) =>
         `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : "") +
-      dig + (id.error ? `<p class="err">${esc(id.error)}</p>` : "") + `</div>`;
+      dig + (id.error ? `<p class="err">${esc(id.error)}</p>` : "") +
+      `<div id="rep-slot"></div></div>`;
+    if (id.sha256) paintReputation(document.getElementById("rep-slot"), id.sha256);
+  }
+
+  // Asking VirusTotal is the one thing here that leaves the machine, so it gets
+  // the same treatment as the registration lookup: its own button, its own
+  // disclosure, and nothing happens until it is pressed.
+  function paintReputation(slot, sha256) {
+    if (!slot) return;
+    if (!VT_KEY_SET) {
+      slot.innerHTML = `<p class="src"><b>Want this checked automatically?</b> Add a free
+        VirusTotal key in Settings and a button appears here to check the fingerprint
+        against about seventy antivirus engines, without you copying anything.</p>`;
+      return;
+    }
+    const btn = document.createElement("button");
+    btn.className = "btn ext-btn";
+    btn.style.marginTop = "12px";
+    btn.textContent = "Check against antivirus engines";
+    const note = document.createElement("span");
+    note.className = "ext";
+    note.textContent = "This sends the fingerprint above to VirusTotal — not the file, not "
+      + "its name, not its location, and nothing else about this computer. They look it up "
+      + "in a database they already have. For common software the question reveals nothing; "
+      + "for a file that exists nowhere else, it tells them somebody has it.";
+    const out = document.createElement("div");
+    slot.append(btn, note, out);
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Asking VirusTotal…";
+      try {
+        const r = await post("/api/reputation?sha256=" + encodeURIComponent(sha256));
+        const body = await r.text();
+        if (!r.ok) throw new Error(body.trim() || r.statusText);
+        renderReputation(out, JSON.parse(body));
+      } catch (e) {
+        out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = "Check against antivirus engines";
+      }
+    });
+  }
+
+  function renderReputation(out, rep) {
+    // Colour by severity, but let the words carry the meaning — a bare "3/72"
+    // misleads in both directions.
+    const tone = rep.malicious >= 3 ? "var(--bad)"
+      : (rep.malicious + rep.suspicious) > 0 ? "var(--new)" : "var(--ok)";
+    const rows = [];
+    if (rep.known) {
+      rows.push(["Flagged as malicious", `${rep.malicious} of ${rep.total} engines`]);
+      if (rep.suspicious) rows.push(["Flagged as suspicious", String(rep.suspicious)]);
+      if (rep.firstSeen) rows.push(["First seen by VirusTotal", rep.firstSeen]);
+      if (rep.labels && rep.labels.length) rows.push(["Called", rep.labels.join(", ")]);
+      if (rep.names && rep.names.length) rows.push(["Also distributed as", rep.names.join(", ")]);
+    }
+    out.innerHTML = `<div class="res" style="margin-top:12px">
+      <p class="note" style="color:${tone}"><b>${esc(rep.verdict)}</b></p>
+      <p class="src" style="font-size:13.5px;color:#dde4f0">${esc(rep.advice)}</p>
+      ${rows.length ? `<dl style="margin-top:10px">${rows.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}
+      <p class="src">Answered by VirusTotal. Engine agreement is evidence, not proof — new
+        malware is missed by everyone on its first day, and ordinary installers trip one or
+        two engines all the time.</p>
+    </div>`;
   }
 
   // ── plain-English help ────────────────────────────────────────────

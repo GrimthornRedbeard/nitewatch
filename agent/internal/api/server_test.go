@@ -11,6 +11,7 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
+	"github.com/threattape/nitewatch/agent/internal/settings"
 )
 
 // localReq builds a request that addresses the agent the way a real local
@@ -253,5 +254,87 @@ func TestNoRouteQueriesTheRegistryOnItsOwn(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&reached); n != 0 {
 		t.Fatalf("ordinary dashboard traffic caused %d outbound registry queries; it must cause none", n)
+	}
+}
+
+// The key must never come back out. A key that is never echoed cannot leak
+// through a screenshot, a bug report, or an extension reading the page.
+func TestSettingsNeverEchoTheVirusTotalKey(t *testing.T) {
+	srv := newTestServer(t)
+	dir := t.TempDir()
+	led, err := ledger.Open(filepath.Join(dir, "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer led.Close()
+	st, err := settings.Open(led.SQL(), settings.Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv = srv.WithSettings(st)
+	h := srv.Handler()
+
+	const secret = "sk-not-a-real-virustotal-key-0123456789"
+	req := httptest.NewRequest(http.MethodPut, "/api/settings",
+		strings.NewReader(`{"virusTotalKey":"`+secret+`","dedupSeconds":300,"retentionDays":90}`))
+	req.Host = "127.0.0.1:8973"
+	req.Header.Set("X-NiteWatch", "1")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save returned %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Error("the save response echoed the key back")
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	get.Host = "127.0.0.1:8973"
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, get)
+	if strings.Contains(rec2.Body.String(), secret) {
+		t.Errorf("GET /api/settings leaked the key: %s", rec2.Body.String())
+	}
+	if !strings.Contains(rec2.Body.String(), `"virusTotalKeySet":true`) {
+		t.Errorf("should report that a key is set: %s", rec2.Body.String())
+	}
+
+	// Saving again with a blank key must not wipe it — the UI never had the
+	// real one to send back.
+	req2 := httptest.NewRequest(http.MethodPut, "/api/settings",
+		strings.NewReader(`{"virusTotalKey":"","dedupSeconds":300,"retentionDays":90}`))
+	req2.Host = "127.0.0.1:8973"
+	req2.Header.Set("X-NiteWatch", "1")
+	req2.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(httptest.NewRecorder(), req2)
+	if st.Get().VirusTotalKey != secret {
+		t.Error("a blank key on save wiped the stored one")
+	}
+}
+
+// Reputation is the most sensitive thing the agent can do. Nothing automatic
+// may reach it, and it must not exist without a key.
+func TestReputationIsGuardedAndOffWithoutAKey(t *testing.T) {
+	h := newTestServer(t).Handler()
+	call := func(method string, hdr map[string]string) int {
+		req := httptest.NewRequest(method, "/api/reputation?sha256="+strings.Repeat("a", 64), nil)
+		req.Host = "127.0.0.1:8973"
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if got := call(http.MethodGet, nil); got == http.StatusOK {
+		t.Error("a GET must not trigger a reputation query")
+	}
+	if got := call(http.MethodPost, nil); got != http.StatusForbidden {
+		t.Errorf("unguarded POST = %d, want 403", got)
+	}
+	// Guarded, but no key configured: the feature does not exist.
+	if got := call(http.MethodPost, map[string]string{"X-NiteWatch": "1"}); got != http.StatusNotFound {
+		t.Errorf("with no key configured = %d, want 404", got)
 	}
 }

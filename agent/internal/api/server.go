@@ -24,6 +24,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/selftest"
 	"github.com/threattape/nitewatch/agent/internal/settings"
+	"github.com/threattape/nitewatch/agent/internal/vt"
 )
 
 //go:embed dashboard
@@ -40,6 +41,7 @@ type Server struct {
 	quarantineDir string
 	token         *Token
 	rdap          *rdap.Client
+	vt            *vt.Client
 	engine        *detect.Engine
 	feeds         *intel.Store
 	addr          string
@@ -95,6 +97,7 @@ func (s *Server) WithLookups(c *rdap.Client) *Server {
 // WithSettings enables the dashboard's configuration panel.
 func (s *Server) WithSettings(st *settings.Store) *Server {
 	s.settings = st
+	s.vt = vt.New(st.Get().VirusTotalKey)
 	return s
 }
 
@@ -168,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 	// Hashing a large file costs real time and touches the disk, so it happens
 	// only when the user asks. Guarded like a mutation for that reason.
 	mux.HandleFunc("/api/verify", guardMutation(s.handleVerify))
+	mux.HandleFunc("/api/reputation", guardMutation(s.handleReputation))
 	mux.HandleFunc("/api/selftest/clear", guardMutation(s.handleClearDrills))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
@@ -300,21 +304,88 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, s.settings.Get())
+		writeJSON(w, redactSecrets(s.settings.Get()))
 	case http.MethodPut, http.MethodPost:
 		var v settings.Values
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&v); err != nil {
 			http.Error(w, "invalid settings payload", http.StatusBadRequest)
 			return
 		}
+		// An empty key on save means "leave it alone", not "delete it" — the GET
+		// above never hands the real one back, so a round-trip through the
+		// settings form would otherwise wipe it. Clearing is explicit.
+		if v.VirusTotalKey == "" && r.URL.Query().Get("clearKey") == "" {
+			v.VirusTotalKey = s.settings.Get().VirusTotalKey
+		}
 		if err := s.settings.Set(v); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, s.settings.Get()) // echo the sanitized result
+		s.refreshVT()
+		writeJSON(w, redactSecrets(s.settings.Get()))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// redactSecrets strips credentials before settings go over the wire. The API is
+// token-guarded, so this is defence in depth rather than the boundary — but a
+// key that is never echoed cannot leak through a screenshot, a bug report, or a
+// browser extension reading the page.
+func redactSecrets(v settings.Values) map[string]any {
+	return map[string]any{
+		"includeLocal":  v.IncludeLocal,
+		"resolveNames":  v.ResolveNames,
+		"recon":         v.Recon,
+		"dedupSeconds":  v.DedupSeconds,
+		"retentionDays": v.RetentionDays,
+		// Whether a key is set, never the key itself.
+		"virusTotalKeySet": v.VirusTotalKey != "",
+	}
+}
+
+// refreshVT rebuilds the reputation client after the key changes.
+func (s *Server) refreshVT() {
+	if s.settings == nil {
+		return
+	}
+	s.mu.Lock()
+	s.vt = vt.New(s.settings.Get().VirusTotalKey)
+	s.mu.Unlock()
+}
+
+// handleReputation asks VirusTotal about one file's fingerprint.
+//
+// The single most sensitive thing this agent can do, and gated accordingly:
+// POST only, guarded, disabled unless the user supplied their own key, and
+// never called by anything automatic. The UI states what leaves the machine and
+// what it does not before the button is pressed.
+func (s *Server) handleReputation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.RLock()
+	client := s.vt
+	s.mu.RUnlock()
+	if client == nil || !client.Enabled() {
+		http.Error(w, "no VirusTotal key is configured — add one in Settings to switch this on",
+			http.StatusNotFound)
+		return
+	}
+	sum := r.URL.Query().Get("sha256")
+	if sum == "" {
+		http.Error(w, "missing sha256", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	rep, err := client.Lookup(ctx, sum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, rep)
 }
 
 // handleStory returns the stored causal chain for one connection: the answer to
