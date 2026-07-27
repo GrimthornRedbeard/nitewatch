@@ -588,47 +588,111 @@
     });
   }
 
+  // ── rendering ─────────────────────────────────────────────────────
+  // The table and the alert list are RECONCILED, not rebuilt.
+  //
+  // Both used to be wiped and regenerated every five seconds. That destroys
+  // every node under the cursor, so hover states flickered, the scroll position
+  // jumped, and a click landing in the same tick as a refresh hit whichever row
+  // had taken that position — which is why the page felt impossible to use. It
+  // also threw away the "Done"/"Dismissed" state of buttons the user had just
+  // pressed.
+  //
+  // Now each row and each alert has a stable key, nodes are reused, and only
+  // the cells whose text actually changed are touched.
+
+  const ROW_CELLS = 11;
+
+  function rowCells(c) {
+    const dest = c.domain || "— no name —";
+    return [
+      [fmtTime(c.lastSeen || c.time), "", "first seen " + fmtTime(c.time)],
+      [shortImage(c.image), "proc", "See everything this program is doing"],
+      [dest, c.domain ? "domain" : "raw", c.domain || "No DNS name seen for this address"],
+      [hostPort(c.remoteIP, c.remotePort), "", hostPort(c.remoteIP, c.remotePort)],
+      [c.asOrg || "—", "owner", c.asn ? "AS" + c.asn : "unknown owner"],
+      [c.country || "—", "cc", ""],
+      [c.proto || "", "", ""],
+      [c.inbound ? "in ←" : "out →", "", c.inbound ? "They contacted this PC" : "This PC contacted them"],
+      [bytes(c.bytesSent), "num", ""],
+      [bytes(c.bytesRecv), "num", ""],
+      [String(c.events || 1), "num", ""],
+    ];
+  }
+
+  function newRow() {
+    const tr = document.createElement("tr");
+    for (let i = 0; i < ROW_CELLS; i++) tr.appendChild(document.createElement("td"));
+    return tr;
+  }
+
+  // Writing to textContent/className unconditionally still dirties the node and
+  // can drop a text selection, so every write is guarded by a comparison.
+  function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
+  function setAttr(el, k, v) { if ((el.getAttribute(k) || "") !== v) el.setAttribute(k, v); }
+
+  function paintRow(tr, c) {
+    const cells = rowCells(c);
+    for (let i = 0; i < ROW_CELLS; i++) {
+      const td = tr.children[i];
+      const [text, cls, title] = cells[i];
+      setText(td, text);
+      if (td.className !== cls) td.className = cls;
+      setAttr(td, "title", title);
+    }
+    tr.children[1].dataset.img = c.image || "";
+    const clickable = !!c.hasStory;
+    if (tr.classList.contains("clickable") !== clickable) {
+      tr.classList.toggle("clickable", clickable);
+      setAttr(tr, "title", clickable ? "Click for the chain of events that caused this connection" : "");
+    }
+    if (tr.dataset.id !== String(c.id)) tr.dataset.id = String(c.id);
+  }
+
   function render() {
     syncCountryOptions();
     const rows = applySort(visible());
     const tb = $("rows");
-    tb.innerHTML = "";
+
+    // Index what is already on screen so nodes survive across refreshes.
+    const existing = new Map();
+    for (const tr of Array.from(tb.children)) existing.set(tr.dataset.id, tr);
+
+    let cursor = tb.firstElementChild;
     for (const c of rows) {
-      const tr = document.createElement("tr");
-      if (c.hasStory) {
-        tr.className = "clickable";
-        tr.title = "Click for the chain of events that caused this connection";
-        tr.addEventListener("click", (ev) => {
-          // The process cell is its own destination; do not hijack it.
-          if (ev.target.closest("td.proc")) return;
-          showStory(c);
-        });
+      const key = String(c.id);
+      let tr = existing.get(key);
+      if (tr) {
+        existing.delete(key);
+      } else {
+        tr = newRow();
       }
-      const dest = c.domain
-        ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
-        : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
-      tr.innerHTML =
-        `<td title="first seen ${esc(fmtTime(c.time))}">${esc(fmtTime(c.lastSeen || c.time))}</td>` +
-        `<td class="proc" data-img="${esc(c.image)}" title="See everything this program is doing">${esc(shortImage(c.image))}</td>` +
-        dest +
-        `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
-        `<td class="owner" title="${c.asn ? "AS" + c.asn : "unknown owner"}">${esc(c.asOrg || "—")}</td>` +
-        `<td class="cc">${esc(c.country || "—")}</td>` +
-        `<td>${esc(c.proto)}</td>` +
-        `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
-        `<td class="num">${esc(bytes(c.bytesSent))}</td>` +
-        `<td class="num">${esc(bytes(c.bytesRecv))}</td>` +
-        `<td class="num">${esc(c.events || 1)}</td>`;
-      tb.appendChild(tr);
+      paintRow(tr, c);
+      if (tr === cursor) {
+        cursor = cursor.nextElementSibling;   // already in the right place
+      } else {
+        tb.insertBefore(tr, cursor);          // moves, or inserts, in one step
+      }
     }
-    tb.querySelectorAll("td.proc").forEach(td => {
-      td.addEventListener("click", (ev) => { ev.stopPropagation(); showProcess(td.dataset.img); });
-    });
+    // Anything left was not in the new list.
+    for (const tr of existing.values()) tr.remove();
+
     $("empty").hidden = rows.length > 0;
-    $("c-total").textContent = rows.length;
-    $("c-talkers").textContent = new Set(rows.map(c => c.image)).size;
-    $("c-domains").textContent = new Set(rows.map(c => c.domain || c.remoteIP)).size;
+    setText($("c-total"), String(rows.length));
+    setText($("c-talkers"), String(new Set(rows.map(c => c.image)).size));
+    setText($("c-domains"), String(new Set(rows.map(c => c.domain || c.remoteIP)).size));
   }
+
+  // Delegated once, rather than rebound to every row on every refresh. This is
+  // also what makes node reuse safe: no listener is ever attached twice.
+  $("rows").addEventListener("click", (ev) => {
+    const proc = ev.target.closest("td.proc");
+    if (proc) { ev.stopPropagation(); showProcess(proc.dataset.img); return; }
+    const tr = ev.target.closest("tr");
+    if (!tr || !tr.classList.contains("clickable")) return;
+    const c = all.find(x => String(x.id) === tr.dataset.id);
+    if (c) showStory(c);
+  });
 
   function syncCountryOptions() {
     const sel = $("ccfilter");
@@ -1293,7 +1357,7 @@
 
   function alertHTML(a) {
     const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
-    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}${isDrill(a) ? " drill" : ""}">
+    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}${isDrill(a) ? " drill" : ""}" data-alert-id="${esc(a.id)}" data-sig="${esc(alertSig(a))}">
       <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${drillBadge(a)}${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
       ${programHTML(a.evidence)}
@@ -1311,23 +1375,70 @@
       const list = await getJSON("/api/alerts?limit=50") || [];
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
-      box.innerHTML = open.map(alertHTML).join("");
-      box.querySelectorAll("[data-allow]").forEach(b => {
-        b.addEventListener("click", async () => {
-          await post("/api/alerts/allow?id=" + encodeURIComponent(b.dataset.allow));
-          refreshAlerts();
-        });
-      });
-      box.querySelectorAll("[data-ack]").forEach(b => {
-        b.addEventListener("click", async () => {
-          await post("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack));
-          refreshAlerts();
-        });
-      });
-      document.title = open.length ? `(${open.length}) NiteWatch` : "NiteWatch — Who's Talking?";
-      open.forEach(a => loadActions(a));
-    } catch (e) { /* ignore */ }
+
+      // Reconciled by alert id, for the same reason as the table — and one
+      // more: an alert card holds state the server knows nothing about. If you
+      // have just pressed "Stop this program" and the card gets rebuilt, the
+      // button reverts and the message saying what happened disappears. Cards
+      // that are already correct are left completely untouched.
+      const existing = new Map();
+      for (const el of Array.from(box.children)) existing.set(el.dataset.alertId, el);
+
+      let cursor = box.firstElementChild;
+      for (const a of open) {
+        const key = String(a.id);
+        let el = existing.get(key);
+        if (el) {
+          existing.delete(key);
+          // Only re-render when the server's view of it actually changed.
+          if (el.dataset.sig !== alertSig(a)) {
+            const tmp = document.createElement("div");
+            tmp.innerHTML = alertHTML(a);
+            const fresh = tmp.firstElementChild;
+            box.replaceChild(fresh, el);
+            el = fresh;
+            loadActions(a);
+          }
+        } else {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = alertHTML(a);
+          el = tmp.firstElementChild;
+          loadActions(a);
+        }
+        if (el === cursor) {
+          cursor = cursor.nextElementSibling;
+        } else {
+          box.insertBefore(el, cursor);
+        }
+      }
+      for (const el of existing.values()) el.remove();
+
+      const title = open.length ? "(" + open.length + ") NiteWatch" : "NiteWatch — Who's Talking?";
+      if (document.title !== title) document.title = title;
+    } catch (e) { /* keep the last good view on a transient error */ }
   }
+
+  // alertSig covers what the SERVER can change about an alert. Anything not in
+  // here is local state that a refresh must not disturb.
+  function alertSig(a) {
+    return [a.id, a.status, a.severity, a.title, a.narrative,
+            (a.playbook || []).length].join("|");
+  }
+
+  // Delegated once for the whole list, so reused cards keep working.
+  $("alerts").addEventListener("click", async (ev) => {
+    const allow = ev.target.closest("[data-allow]");
+    if (allow) {
+      await post("/api/alerts/allow?id=" + encodeURIComponent(allow.dataset.allow));
+      refreshAlerts();
+      return;
+    }
+    const ack = ev.target.closest("[data-ack]");
+    if (ack) {
+      await post("/api/alerts/ack?id=" + encodeURIComponent(ack.dataset.ack));
+      refreshAlerts();
+    }
+  });
   // Remediation buttons are added only after asking the agent what it can
   // actually do for this alert — offering a fix that cannot run is worse than
   // offering none.
@@ -1371,16 +1482,57 @@
     } catch (e) { /* leave the alert without action buttons */ }
   }
 
+  // A refresh must never move something out from under the pointer.
+  //
+  // Reconciling the DOM removed most of the jumping, but two sources remained:
+  // re-sorting can legitimately reorder rows while somebody is reaching for
+  // one, and re-rendering behind an open modal is work nobody can see. So the
+  // paint is deferred — not the fetch — whenever the user is plainly in the
+  // middle of something. The data stays current; only the redraw waits.
+  function userIsBusy() {
+    if (document.querySelector(".modal.show")) return true;      // reading a story
+    if (document.getElementById("settings").classList.contains("show")) return true;
+    if (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
+      return true;                                               // typing a filter
+    }
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return true;                    // copying text
+    if (document.querySelector("#rows tr:hover")) return true;   // about to click a row
+    return false;
+  }
+
+  let pendingPaint = false;
+
+  function paint() {
+    if (userIsBusy()) { pendingPaint = true; return; }
+    pendingPaint = false;
+    // Reconciling can still change the scroll extent when rows are added or
+    // removed; hold the horizontal position so a wide table does not slide.
+    const wrap = document.querySelector(".tablewrap");
+    const left = wrap ? wrap.scrollLeft : 0;
+    render();
+    if (wrap && wrap.scrollLeft !== left) wrap.scrollLeft = left;
+  }
+
+  // Apply a deferred paint as soon as the user is free.
+  //
+  // Deliberately a poll rather than a list of events to listen for. The obvious
+  // events do not line up with the state they are supposed to signal: a modal
+  // closes on `click`, which fires AFTER `mouseup`, so a mouseup handler still
+  // sees the modal open and defers again. Rather than enumerate every way a
+  // person can stop being busy and get the ordering right for each, ask.
+  setInterval(() => { if (pendingPaint && !userIsBusy()) paint(); }, 400);
+
   async function refresh() {
     refreshAlerts();
     try {
-      const r = await get("/api/connections?limit=1000");
-      all = await r.json() || [];
-      render();
+      const rows = await getJSON("/api/connections?limit=1000");
+      all = rows || [];
+      paint();
     } catch (e) { /* keep last view on transient error */ }
     refreshStatus();
   }
-  $("filter").addEventListener("input", render);
+  $("filter").addEventListener("input", () => { pendingPaint = false; render(); });
 
   // Restore the plain-English preference before the first paint, so the page
   // does not flash from one mode to the other.
