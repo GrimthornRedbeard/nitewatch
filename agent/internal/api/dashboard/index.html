@@ -128,6 +128,22 @@
   .actmsg { font-size: 12px; margin-top: 8px; color: #7ddc9a; }
   .actmsg.bad { color: #ff9f9f; }
   .alert.acked { opacity: .55; }
+  /* Clickable things must LOOK clickable. The causal data was previously
+     reachable only by guessing that rows respond to a click. */
+  td.proc { color: var(--accent); cursor: pointer; }
+  td.proc:hover { text-decoration: underline; }
+  td.proc::after { content: " ›"; opacity: .5; }
+  .pstat { display: flex; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px;
+    padding: 12px 14px; background: #0e1420; border: 1px solid var(--line); border-radius: 8px; }
+  .pstat div .n { font-size: 18px; font-weight: 600; }
+  .pstat div .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .psec { margin-top: 18px; }
+  .psec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); margin: 0 0 8px; }
+  .plist { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  .plist li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  .plist li:last-child { border-bottom: none; }
+  .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; }
   .why { color: var(--muted); font-size: 12px; margin-top: 16px;
     border-top: 1px solid var(--line); padding-top: 12px; }
 </style>
@@ -207,7 +223,20 @@
     <tbody id="rows"></tbody>
   </table>
   <div id="empty" class="empty" hidden>No connections recorded yet.</div>
-  <div class="foot">Click any row to see what caused that connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+  <div class="foot"><b>Click a program name</b> for everything it is doing —
+    what started it, everywhere it talks, how much it sends.
+    <b>Click anywhere else in a row</b> for the chain of events behind that one
+    connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+</div>
+
+<div class="modal" id="proc-modal">
+  <div class="box">
+    <h2 id="proc-title" style="margin:0 0 4px;font-size:15px"></h2>
+    <div class="prog" id="proc-path"></div>
+    <div class="pstat" id="proc-stats"></div>
+    <div id="proc-body"></div>
+    <div style="margin-top:16px"><button class="btn" id="proc-close">Close</button></div>
+  </div>
 </div>
 
 <div class="modal" id="story-modal">
@@ -353,15 +382,19 @@
       const tr = document.createElement("tr");
       if (c.hasStory) {
         tr.className = "clickable";
-        tr.title = "Click to see what caused this connection";
-        tr.addEventListener("click", () => showStory(c));
+        tr.title = "Click for the chain of events that caused this connection";
+        tr.addEventListener("click", (ev) => {
+          // The process cell is its own destination; do not hijack it.
+          if (ev.target.closest("td.proc")) return;
+          showStory(c);
+        });
       }
       const dest = c.domain
         ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
         : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
       tr.innerHTML =
         `<td title="first seen ${esc(fmtTime(c.time))}">${esc(fmtTime(c.lastSeen || c.time))}</td>` +
-        `<td title="${esc(c.image)}">${esc(shortImage(c.image))}</td>` +
+        `<td class="proc" data-img="${esc(c.image)}" title="See everything this program is doing">${esc(shortImage(c.image))}</td>` +
         dest +
         `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
         `<td class="owner" title="${c.asn ? "AS" + c.asn : "unknown owner"}">${esc(c.asOrg || "—")}</td>` +
@@ -373,6 +406,9 @@
         `<td class="num">${esc(c.events || 1)}</td>`;
       tb.appendChild(tr);
     }
+    tb.querySelectorAll("td.proc").forEach(td => {
+      td.addEventListener("click", (ev) => { ev.stopPropagation(); showProcess(td.dataset.img); });
+    });
     $("empty").hidden = rows.length > 0;
     $("c-total").textContent = rows.length;
     $("c-talkers").textContent = new Set(rows.map(c => c.image)).size;
@@ -442,6 +478,55 @@
   });
 
   // --- causal story ---
+  // Everything known about one program, in one place.
+  async function showProcess(image) {
+    if (!image) return;
+    try {
+      const p = await (await get("/api/process?image=" + encodeURIComponent(image))).json();
+      $("proc-title").textContent = shortImage(image);
+      $("proc-path").innerHTML = `<span class="k">Program:</span> ${esc(image)}`;
+      $("proc-stats").innerHTML =
+        stat(p.destinations, "destinations") +
+        stat(bytes(p.bytesSent), "sent") +
+        stat(bytes(p.bytesRecv), "received") +
+        stat(p.countries, "countries") +
+        stat((p.alerts || []).length, "alerts");
+
+      let html = "";
+      if (p.story && (p.story.steps || []).length) {
+        html += `<div class="psec"><h3>How it got here</h3><ol class="chain">` +
+          p.story.steps.map(s =>
+            `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
+            (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
+            (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("") +
+          `</ol></div>`;
+      }
+      const conns = (p.connections || []).slice(0, 40);
+      if (conns.length) {
+        html += `<div class="psec"><h3>Everywhere it talks (${p.destinations})</h3><ul class="plist">` +
+          conns.map(c => `<li><span>${esc(c.domain || c.remoteIP)}</span>` +
+            `<span class="g">${esc(c.asOrg || "—")} ${esc(c.country || "")} · ` +
+            `↑${esc(bytes(c.bytesSent))} ↓${esc(bytes(c.bytesRecv))}</span></li>`).join("") +
+          `</ul></div>`;
+      }
+      if ((p.alerts || []).length) {
+        html += `<div class="psec"><h3>Alerts about this program</h3><ul class="plist">` +
+          p.alerts.map(a => `<li><span>${esc(a.title)}</span>` +
+            `<span class="g">${esc(a.severity)} · ${esc(ago(a.time))}</span></li>`).join("") +
+          `</ul></div>`;
+      }
+      $("proc-body").innerHTML = html || `<p class="hint">No activity recorded yet.</p>`;
+      $("proc-modal").classList.add("show");
+    } catch (e) { /* ignore */ }
+  }
+  function stat(n, label) {
+    return `<div><div class="n">${esc(n)}</div><div class="l">${esc(label)}</div></div>`;
+  }
+  $("proc-close").addEventListener("click", () => $("proc-modal").classList.remove("show"));
+  $("proc-modal").addEventListener("click", (e) => {
+    if (e.target === $("proc-modal")) $("proc-modal").classList.remove("show");
+  });
+
   async function showStory(c) {
     if (!c.hasStory) return;
     try {
@@ -467,7 +552,10 @@
     if (e.target === $("story-modal")) $("story-modal").classList.remove("show");
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") $("story-modal").classList.remove("show");
+    if (e.key === "Escape") {
+      $("story-modal").classList.remove("show");
+      $("proc-modal").classList.remove("show");
+    }
   });
 
   async function refreshStatus() {

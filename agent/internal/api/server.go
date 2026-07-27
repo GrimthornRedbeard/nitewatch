@@ -130,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 		guardMutation(s.handleSettings)(w, r)
 	})
 	mux.HandleFunc("/api/story", s.handleStory)
+	mux.HandleFunc("/api/process", s.handleProcess)
 	mux.HandleFunc("/api/alerts", s.handleAlerts)
 	mux.HandleFunc("/api/alerts/ack", guardMutation(s.handleAckAlert))
 	mux.HandleFunc("/api/alerts/allow", guardMutation(s.handleAllowAlert))
@@ -556,6 +557,92 @@ func (s *Server) dashboardHandler(next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(body))
 	})
+}
+
+// handleProcess assembles everything known about one program.
+//
+// The causal data was previously scattered: a chain behind a row click, a
+// context panel that only appeared when something had already gone wrong. This
+// is the place a person can actually go and ask "what is this program doing?"
+// — its identity, what started it, everywhere it talks, how much it sends, and
+// anything ever raised about it.
+func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
+	image := r.URL.Query().Get("image")
+	if image == "" {
+		http.Error(w, "missing image", http.StatusBadRequest)
+		return
+	}
+
+	conns, err := s.ledger.ConnectionsForImage(image, 500)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	alerts, _ := s.ledger.AlertsForImage(image, 20)
+
+	var sent, recv uint64
+	dests := map[string]bool{}
+	countries := map[string]bool{}
+	var latestPID uint32
+	var story string
+	out := make([]connectionDTO, 0, len(conns))
+	for i, c := range conns {
+		sent += c.BytesSent
+		recv += c.BytesRecv
+		d := c.Domain
+		if d == "" {
+			d = c.RemoteIP
+		}
+		dests[d] = true
+		if c.Country != "" {
+			countries[c.Country] = true
+		}
+		if i == 0 {
+			latestPID = c.PID
+			story = c.Story // the most recent causal chain for this program
+		}
+		out = append(out, connectionDTO{
+			Time: c.Time, LastSeen: c.LastSeen, Events: c.Events, PID: c.PID,
+			Image: c.Image, RemoteIP: c.RemoteIP, RemotePort: c.RemotePort,
+			Proto: c.Proto, Domain: c.Domain, Verdict: c.Verdict,
+			IPVersion: ipVersion(c.RemoteIP), Inbound: c.Inbound,
+			ASN: c.ASN, ASOrg: c.ASOrg, Country: c.Country,
+			ID: c.ID, HasStory: c.Story != "",
+			BytesSent: c.BytesSent, BytesRecv: c.BytesRecv,
+		})
+	}
+
+	alertOut := make([]alertDTO, 0, len(alerts))
+	for _, a := range alerts {
+		pb := a.Playbook
+		if pb == nil {
+			pb = []string{}
+		}
+		alertOut = append(alertOut, alertDTO{
+			ID: a.ID, Time: a.Time, RuleID: a.RuleID, Area: a.Area,
+			Severity: a.Severity, Title: a.Title, Narrative: a.Narrative,
+			Playbook: pb, ConnID: a.ConnID, Evidence: a.Evidence, Status: a.Status,
+		})
+	}
+
+	writeJSON(w, map[string]any{
+		"image":        image,
+		"pid":          latestPID,
+		"connections":  out,
+		"alerts":       alertOut,
+		"bytesSent":    sent,
+		"bytesRecv":    recv,
+		"destinations": len(dests),
+		"countries":    len(countries),
+		"story":        json.RawMessage(storyOrNull(story)),
+	})
+}
+
+func storyOrNull(s string) string {
+	if s == "" {
+		return "null"
+	}
+	return s
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

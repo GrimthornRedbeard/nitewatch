@@ -200,7 +200,10 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanConnections(rows)
+}
 
+func scanConnections(rows *sql.Rows) ([]Connection, error) {
 	var out []Connection
 	for rows.Next() {
 		var c Connection
@@ -249,6 +252,43 @@ func (d *DB) Prune(retention time.Duration, now time.Time) (int64, error) {
 		return n, err
 	}
 	return n, nil
+}
+
+// ConnectionsForImage returns every recorded flow for one program, newest
+// first. This is the backbone of the process view: a program's whole network
+// footprint in one place, rather than scattered across a table sorted by time.
+func (d *DB) ConnectionsForImage(image string, limit int) ([]Connection, error) {
+	rows, err := d.sql.Query(
+		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
+		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound,
+		        asn, COALESCE(as_org, ''), COALESCE(country, ''), COALESCE(story, ''), id,
+		        bytes_sent, bytes_recv
+		 FROM connections WHERE image = ? ORDER BY last_seen DESC, id DESC LIMIT ?`,
+		image, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanConnections(rows)
+}
+
+// AlertsForImage returns alerts naming a program, so its history is visible
+// from the same place as its traffic.
+func (d *DB) AlertsForImage(image string, limit int) ([]Alert, error) {
+	all, err := d.RecentAlerts(500)
+	if err != nil {
+		return nil, err
+	}
+	var out []Alert
+	for _, a := range all {
+		if p, _ := a.Evidence["ImagePath"].(string); p == image {
+			out = append(out, a)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // UnnamedIPs returns distinct remote addresses among recent rows that still
