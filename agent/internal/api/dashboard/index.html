@@ -182,6 +182,11 @@
   .alert .fix.hard { border-color: #7a3030; background: #331717; color: #ffbcbc; }
   .alert .fix.hard:hover { border-color: #a34545; background: #431d1d; }
   .alert.acked { opacity: .58; }
+  /* A drill is visibly a drill, everywhere, always. */
+  .sev.drill { background: #14344a; color: #8fd0ff; border: 1px solid #2f6b93; }
+  .alert.drill { border-left-color: #4a8fc0 !important;
+    background: repeating-linear-gradient(135deg, var(--panel), var(--panel) 14px,
+      #141b29 14px, #141b29 28px); }
 
   .prog { margin: 10px 0 0; font-size: 13.5px; font-family: var(--mono);
     color: #dde4f0; word-break: break-all; background: #101725;
@@ -276,6 +281,7 @@
       Explain everything
     </label>
     <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
+    <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
     <button class="btn" id="settings-btn">Settings</button>
   </div>
 </header>
@@ -354,6 +360,34 @@
     what started it, everywhere it talks, how much it sends.
     <b>Click anywhere else in a row</b> for the chain of events behind that one
     connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+</div>
+
+<div class="modal" id="test-modal">
+  <div class="box">
+    <h2>Is this thing working?</h2>
+    <p class="hint">Fair question. Security software that is doing its job is silent,
+      and silent looks exactly like broken.</p>
+    <p style="font-size:15.5px;line-height:1.7">
+      This runs a drill: it makes NiteWatch raise <b>every kind of warning it knows how to
+      raise</b>, all at once, so you can see what each one looks like and read what it means
+      before you ever meet one for real. Below is what each will say, and what would actually
+      be happening on your computer for it to appear.
+    </p>
+    <p class="whatis" style="margin-top:14px">
+      <b>Nothing bad happens.</b> No file is touched, no program is started, nothing connects
+      anywhere. The warnings are marked as a test and you can clear them with one button.
+      <br><b>What this proves:</b> that the warnings, the advice and the buttons all work.
+      <b>What it does not prove:</b> that the watching works — the banner at the top of the
+      page is what tells you that.
+    </p>
+    <div id="test-plan" style="margin-top:18px"></div>
+    <div id="test-result" class="actmsg" hidden></div>
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn primary" id="test-run">Run the test</button>
+      <button class="btn" id="test-clear">Clear test warnings</button>
+      <button class="btn" id="test-close">Close</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="gloss-modal">
@@ -637,6 +671,80 @@
 
   // --- causal story ---
   // Everything known about one program, in one place.
+  // ── the drill ─────────────────────────────────────────────────────
+  // "Is this thing even on?" is a fair question about software that is silent
+  // by design. This answers it by making every warning appear at once, with an
+  // explanation of what would really be happening for each.
+  async function paintTestPlan() {
+    try {
+      const d = await getJSON("/api/selftest/plan");
+      $("test-plan").innerHTML = `<div class="cause"><h4>What it will show you</h4><ul>` +
+        (d.scenarios || []).map(sc =>
+          `<li style="margin-bottom:9px"><b>${esc(sc.title)}</b><br>
+             <span style="color:var(--muted)">${esc(sc.real)}</span></li>`).join("") +
+        `</ul></div>`;
+    } catch (e) {
+      $("test-plan").innerHTML = `<p class="whatis">${esc(String(e.message || e))}</p>`;
+    }
+  }
+
+  $("test-btn").addEventListener("click", async () => {
+    $("test-result").hidden = true;
+    $("test-modal").classList.add("show");
+    await paintTestPlan();
+  });
+  $("test-close").addEventListener("click", () => $("test-modal").classList.remove("show"));
+  $("test-modal").addEventListener("click", (e) => {
+    if (e.target === $("test-modal")) $("test-modal").classList.remove("show");
+  });
+
+  $("test-run").addEventListener("click", async () => {
+    const b = $("test-run");
+    b.disabled = true; b.textContent = "Running…";
+    const out = $("test-result");
+    out.hidden = false; out.classList.remove("bad");
+    try {
+      const r = await post("/api/selftest");
+      const body = await r.text();
+      if (!r.ok) throw new Error(body.trim() || r.statusText);
+      const res = JSON.parse(body);
+      const skipped = (res.scenarios || []).filter(x => x.skipped);
+      const skipNote = skipped.length
+        ? " " + skipped.length + " was skipped: " + skipped.map(x => x.skip).join(" ")
+        : "";
+      if (res.missing && res.missing.length) {
+        out.classList.add("bad");
+        out.textContent = `${res.fired} of ${res.expected} warnings appeared. `
+          + `These did not, which is a real fault worth reporting: ${res.missing.join(", ")}.`
+          + skipNote;
+      } else {
+        out.textContent = `All ${res.expected} warnings appeared. Close this and scroll `
+          + `the list — each is marked TEST. "Clear test warnings" removes them.` + skipNote;
+      }
+      await refreshAlerts();
+    } catch (e) {
+      out.classList.add("bad");
+      out.textContent = String(e.message || e);
+    } finally {
+      b.disabled = false; b.textContent = "Run the test";
+    }
+  });
+
+  $("test-clear").addEventListener("click", async () => {
+    const out = $("test-result");
+    out.hidden = false; out.classList.remove("bad");
+    try {
+      const r = await post("/api/selftest/clear");
+      const body = await r.text();
+      if (!r.ok) throw new Error(body.trim() || r.statusText);
+      out.textContent = `Removed ${JSON.parse(body).removed} test warnings. Real ones are untouched.`;
+      await refreshAlerts();
+    } catch (e) {
+      out.classList.add("bad");
+      out.textContent = String(e.message || e);
+    }
+  });
+
   // ── plain-English help ────────────────────────────────────────────
   // Off by default. Somebody who knows what a PID is should never have to look
   // at a definition of one, so this adds nothing to the page until asked.
@@ -990,10 +1098,18 @@
       RegPersist: "Changed startup setting" })[kind] || kind;
   }
 
+  // A drill must never be mistakable for a real warning. Somebody who sees
+  // "your files are being encrypted", acts on it, and later learns it was a
+  // test will not believe the next one.
+  function isDrill(a) { return !!(a.evidence && a.evidence.Drill); }
+  function drillBadge(a) {
+    return isDrill(a) ? `<span class="sev drill">TEST</span>` : "";
+  }
+
   function alertHTML(a) {
     const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
-    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}">
-      <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
+    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}${isDrill(a) ? " drill" : ""}">
+      <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${drillBadge(a)}${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
       ${programHTML(a.evidence)}
       ${steps ? `<ol>${steps}</ol>` : ""}

@@ -17,9 +17,11 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/explain"
+	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
+	"github.com/threattape/nitewatch/agent/internal/selftest"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 )
 
@@ -37,6 +39,8 @@ type Server struct {
 	quarantineDir string
 	token         *Token
 	rdap          *rdap.Client
+	engine        *detect.Engine
+	feeds         *intel.Store
 	addr          string
 
 	mu     sync.RWMutex
@@ -156,6 +160,11 @@ func (s *Server) Handler() http.Handler {
 	// Nothing should be able to trigger it by embedding a URL.
 	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
 	mux.HandleFunc("/api/explain", s.handleExplain)
+	// Both mutate: one writes alerts, the other deletes them. Guarded so no
+	// link or image can make the agent shout at somebody.
+	mux.HandleFunc("/api/selftest", guardMutation(s.handleSelfTest))
+	mux.HandleFunc("/api/selftest/plan", s.handleSelfTestPlan)
+	mux.HandleFunc("/api/selftest/clear", guardMutation(s.handleClearDrills))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -375,6 +384,51 @@ func (s *Server) handleExplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"terms": explain.AllTerms()})
+}
+
+// WithSelfTest enables the on-demand drill. Optional, like the executor: an
+// agent without it still alerts normally.
+func (s *Server) WithSelfTest(e *detect.Engine, feeds *intel.Store) *Server {
+	s.engine = e
+	s.feeds = feeds
+	return s
+}
+
+// handleSelfTestPlan describes what the drill will do, before it does it. Read
+// only — the UI shows this so nobody presses a button whose effect is a screen
+// full of "your files are being encrypted" they did not expect.
+func (s *Server) handleSelfTestPlan(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"scenarios": selftest.Explain(time.Now())})
+}
+
+func (s *Server) handleSelfTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.engine == nil {
+		http.Error(w, "detection is not enabled on this agent, so there is nothing to test", http.StatusNotFound)
+		return
+	}
+	res, err := selftest.Run(s.engine, s.feeds, s.ledger, time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, res)
+}
+
+func (s *Server) handleClearDrills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	n, err := s.ledger.DeleteDrillAlerts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"removed": n})
 }
 
 type alertDTO struct {
