@@ -404,6 +404,7 @@
     <h2 id="proc-title"></h2>
     <div class="prog" id="proc-path"></div>
     <p class="whatis plain-only" id="proc-whatis"></p>
+    <div class="lookup" id="proc-verify"></div>
     <div class="pstat" id="proc-stats"></div>
     <div id="proc-body"></div>
     <div style="margin-top:16px"><button class="btn" id="proc-close">Close</button></div>
@@ -745,6 +746,82 @@
     }
   });
 
+  // ── "is this program legitimate?" ─────────────────────────────────
+  // The honest answer to an unsigned program is: here is everything this
+  // machine can tell you, and here is the one number you can check elsewhere.
+  // Nothing is sent anywhere — pasting a hash into a reputation service is the
+  // user's decision, on a machine of their choosing.
+  function paintVerify(image) {
+    const el = $("proc-verify");
+    el.innerHTML = "";
+    if (!image) return;
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Check this program";
+    const note = document.createElement("span");
+    note.className = "ext";
+    note.textContent = "Reads the program file on this computer — its fingerprint, its size, "
+      + "and the publisher details built into it. Nothing is sent anywhere. Large programs "
+      + "take a moment.";
+    const out = document.createElement("div");
+    el.append(btn, note, out);
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Reading the file…";
+      try {
+        const r = await post("/api/verify?image=" + encodeURIComponent(image));
+        const body = await r.text();
+        if (!r.ok) throw new Error(body.trim() || r.statusText);
+        renderVerify(out, JSON.parse(body));
+      } catch (e) {
+        out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = "Check this program";
+      }
+    });
+  }
+
+  function renderVerify(out, d) {
+    const id = d.identity || {};
+    const rows = [];
+    const add = (k, v) => { if (v) rows.push([k, v]); };
+    add("Publisher (from the signature)", d.signer);
+    add("Company (claimed by the file)", id.company);
+    add("Product", id.product);
+    add("Version", id.fileVersion);
+    add("Description", id.description);
+    if (d.store && d.package) {
+      add("Store package", d.package.name);
+      add("Publisher ID", d.package.publisherId);
+    }
+    add("Size", id.sizeBytes ? bytes(id.sizeBytes) : "");
+    add("Fingerprint (SHA-256)", id.sha256);
+
+    const verdict = d.vouched
+      ? `<p class="note">This program is ${esc(d.why)}</p>`
+      : `<p class="note">Nothing vouches for this program. It carries no signature Windows
+           can check, and it is not installed from a place only Windows can write to. That is
+           not proof of anything — plenty of small tools are like this — but it means the
+           name and the icon are the only things claiming what it is, and both are trivial
+           to copy.</p>`;
+
+    const dig = id.sha256 ? `
+      <p class="src"><b>To check it yourself:</b> the fingerprint above is unique to this exact
+        file. Copy it and paste it into <b>virustotal.com</b> — that searches by fingerprint
+        alone, so you are not uploading your file or telling anyone your filenames. Dozens of
+        antivirus engines will say whether they have seen it. A fingerprint nobody has ever
+        seen is not automatically bad, but for a program claiming to be well-known software it
+        is a very odd thing to be.</p>
+      <p class="src">Cross-check the claimed company against where the file actually lives. A
+        file claiming to be from Microsoft, sitting in your Downloads folder, unsigned, is
+        claiming something it cannot back up.</p>` : "";
+
+    out.innerHTML = `<div class="res">` + verdict +
+      (rows.length ? `<dl>${rows.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : "") +
+      dig + (id.error ? `<p class="err">${esc(id.error)}</p>` : "") + `</div>`;
+  }
+
   // ── plain-English help ────────────────────────────────────────────
   // Off by default. Somebody who knows what a PID is should never have to look
   // at a definition of one, so this adds nothing to the page until asked.
@@ -826,6 +903,7 @@
       $("proc-title").textContent = shortImage(image);
       $("proc-path").innerHTML = `<span class="k">Program:</span> ${esc(image)}`;
       await paintWhatIs(image);
+      paintVerify(image);
       $("proc-stats").innerHTML =
         stat(p.destinations, "destinations") +
         stat(bytes(p.bytesSent), "sent") +

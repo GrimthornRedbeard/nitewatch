@@ -19,6 +19,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/explain"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/selftest"
@@ -164,6 +165,9 @@ func (s *Server) Handler() http.Handler {
 	// link or image can make the agent shout at somebody.
 	mux.HandleFunc("/api/selftest", guardMutation(s.handleSelfTest))
 	mux.HandleFunc("/api/selftest/plan", s.handleSelfTestPlan)
+	// Hashing a large file costs real time and touches the disk, so it happens
+	// only when the user asks. Guarded like a mutation for that reason.
+	mux.HandleFunc("/api/verify", guardMutation(s.handleVerify))
 	mux.HandleFunc("/api/selftest/clear", guardMutation(s.handleClearDrills))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
@@ -429,6 +433,39 @@ func (s *Server) handleClearDrills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"removed": n})
+}
+
+// handleVerify gathers everything the machine itself can say about a program
+// file: its hash, its size, and the publisher details embedded in it.
+//
+// Nothing is sent anywhere. The point is to hand the user facts they can check
+// themselves — pasting a hash into a reputation service is their decision to
+// make, on a machine of their choosing, not something this agent does on their
+// behalf.
+func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	image := r.URL.Query().Get("image")
+	if image == "" {
+		http.Error(w, "missing image", http.StatusBadRequest)
+		return
+	}
+	id := platform.Identify(image)
+	signed, signer := platform.FileSigner(image)
+	trust := detect.ClassifyInstall(image, signed, signer)
+	pkg, ver, pubID, isStore := detect.StorePackage(image)
+
+	writeJSON(w, map[string]any{
+		"identity": id,
+		"signed":   signed,
+		"signer":   signer,
+		"vouched":  trust.Vouched,
+		"why":      trust.Why,
+		"store":    isStore,
+		"package":  map[string]any{"name": pkg, "version": ver, "publisherId": pubID},
+	})
 }
 
 type alertDTO struct {

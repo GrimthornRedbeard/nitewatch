@@ -178,9 +178,11 @@ func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
 	if s.Domain != "" {
 		return nil
 	}
-	// Signed software is accountable to a publisher; that alone removes this
-	// weak signal's entire basis.
-	if s.Event.Signed {
+	// Software with an accountable publisher removes this weak signal's entire
+	// basis. "Accountable" is broader than "carries an Authenticode signature":
+	// Store apps are signed at the package level and report as unsigned here,
+	// and Windows' own components are vouched for by where they live.
+	if PublisherVouched(s.Conn.Image, s.Event.Signed, s.Event.Signer) {
 		return nil
 	}
 	// Ownership data is what makes the rest judgeable, and it loads in the
@@ -223,7 +225,13 @@ func SharedInfrastructure(org string) bool {
 // contact with a destination. Signature data is Windows-only; elsewhere Signed
 // is false for everything, so the FirstContact gate keeps this quiet.
 func detectUnsignedOutbound(s Subject, _ *Engine) map[string]any {
-	if s.Event.Signed || s.Conn.Inbound || !s.FirstContact {
+	if s.Conn.Inbound || !s.FirstContact {
+		return nil
+	}
+	// See detectRawIPNoDNS: an unsigned binary under WindowsApps is a Store app
+	// whose signature lives on the package, not the file. Reporting those as
+	// "software with no publisher" fired on every Store app the user owned.
+	if PublisherVouched(s.Conn.Image, s.Event.Signed, s.Event.Signer) {
 		return nil
 	}
 	if s.Event.Kind != event.KindNetConnect || s.Conn.Image == "" {

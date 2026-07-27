@@ -203,6 +203,12 @@ func detectBeaconing(s Subject, e *Engine) map[string]any {
 	if s.Event.Signed && SignerMatchesOrg(s.Event.Signer, s.Recon.Org) {
 		return nil
 	}
+	// A Store app polling on a timer is a Store app working. The package is
+	// signed and Microsoft-vetted even though the .exe carries no embedded
+	// signature for SignerMatchesOrg to compare.
+	if ClassifyInstall(s.Conn.Image, s.Event.Signed, s.Event.Signer).Store {
+		return nil
+	}
 	dest := s.Domain
 	if dest == "" {
 		dest = s.Conn.RemoteIP
