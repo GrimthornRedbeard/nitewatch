@@ -268,3 +268,33 @@ func kinds(as []Action) []Kind {
 	}
 	return out
 }
+
+// Reported from a live machine: an alert for a connection whose program could
+// not be identified offered "Stop An unknown program now (cannot be undone)".
+// A button to irreversibly stop something we cannot name is not an action
+// anybody can take responsibly.
+func TestNoProgramActionsWhenTheProgramIsUnknown(t *testing.T) {
+	acts := Suggest("c2", "critical", map[string]any{
+		"ImagePath":   "",
+		"ProcessName": "an unidentified program",
+		"PID":         float64(1234),
+		"RemoteIP":    "2620:100:601f:17::a27d:911",
+	})
+	for _, a := range acts {
+		switch a.Kind {
+		case KillProcess, QuarantineFile:
+			t.Errorf("offered %v for a program we cannot identify: %q", a.Kind, a.Label)
+		}
+	}
+	// Blocking the destination is still meaningful: it acts on the address,
+	// not on the program.
+	var canBlock bool
+	for _, a := range acts {
+		if a.Kind == BlockAddress {
+			canBlock = true
+		}
+	}
+	if !canBlock {
+		t.Error("blocking the address should still be offered")
+	}
+}

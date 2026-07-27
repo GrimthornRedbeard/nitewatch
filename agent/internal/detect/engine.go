@@ -101,17 +101,22 @@ func baseFields(s Subject) map[string]any {
 	}
 	return map[string]any{
 		"ProcessName": shortName(s.Conn.Image),
-		"ImagePath":   s.Conn.Image,
-		"PID":         s.Conn.PID,
-		"Destination": dest,
-		"RemoteIP":    s.Conn.RemoteIP,
-		"RemotePort":  s.Conn.RemotePort,
-		"Domain":      s.Domain,
-		"Owner":       s.Recon.Org,
-		"BytesSent":   humanBytes(s.Conn.BytesSent),
-		"BytesRecv":   humanBytes(s.Conn.BytesRecv),
-		"Country":     s.Recon.Country,
-		"ASN":         s.Recon.ASN,
+		// ProcessKnown lets a rule word itself differently when the acting
+		// program could not be identified — which happens when a connection is
+		// seen for a process that started before the agent did and has since
+		// exited.
+		"ProcessKnown": s.Conn.Image != "",
+		"ImagePath":    s.Conn.Image,
+		"PID":          s.Conn.PID,
+		"Destination":  dest,
+		"RemoteIP":     s.Conn.RemoteIP,
+		"RemotePort":   s.Conn.RemotePort,
+		"Domain":       s.Domain,
+		"Owner":        s.Recon.Org,
+		"BytesSent":    humanBytes(s.Conn.BytesSent),
+		"BytesRecv":    humanBytes(s.Conn.BytesRecv),
+		"Country":      s.Recon.Country,
+		"ASN":          s.Recon.ASN,
 	}
 }
 
@@ -122,7 +127,11 @@ func shortName(p string) string {
 		}
 	}
 	if p == "" {
-		return "An unknown program"
+		// Lower case and indefinite, so it reads as a description wherever a
+		// template drops it: "...stop an unidentified program". The previous
+		// value was capitalised, which produced "Do you recognise An unknown
+		// program?" and made a gap in our data look like a program's name.
+		return "an unidentified program"
 	}
 	return p
 }
@@ -171,6 +180,14 @@ func detectIntelHit(s Subject, e *Engine) map[string]any {
 // otherwise trains people to dismiss the alerts that matter.
 func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
 	if s.HadDNS || s.Conn.Inbound || !s.FirstContact {
+		return nil
+	}
+	// Half this rule is a claim about the program: that nobody vouches for it.
+	// With no image we never checked, so "software with no publisher" is not a
+	// finding, it is a gap in our own data being reported as evidence. It also
+	// leaves the reader nothing to act on — you cannot recognise, allow or stop
+	// a program that has no name.
+	if s.Conn.Image == "" {
 		return nil
 	}
 	// A name from any source means the destination is identifiable, which is
@@ -246,6 +263,11 @@ func detectUnsignedOutbound(s Subject, _ *Engine) map[string]any {
 // legitimate services are hosted abroad.
 func detectForeignFirstContact(s Subject, _ *Engine) map[string]any {
 	if !s.FirstContact || s.Conn.Inbound || s.Recon.Country == "" {
+		return nil
+	}
+	// Geography alone is a hint, and a hint about an unnamed program is not
+	// something anybody can act on.
+	if s.Conn.Image == "" {
 		return nil
 	}
 	if !watchedCountry(s.Recon.Country) {

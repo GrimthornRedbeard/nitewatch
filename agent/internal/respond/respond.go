@@ -71,6 +71,14 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 
 	image := str(ev, "ImagePath")
 	proc := str(ev, "ProcessName")
+	// With no image the acting program was never identified — usually because
+	// it exited before the connection was recorded. Offering "Stop <it>" and
+	// "Quarantine <it>" then is offering to act on something we cannot name,
+	// and the button text reads as nonsense. Blocking the address still works,
+	// because that acts on the destination rather than the program.
+	if image == "" {
+		proc = ""
+	}
 	pid := str(ev, "PID")
 	ip := str(ev, "RemoteIP")
 	dest := str(ev, "Destination")

@@ -20,7 +20,7 @@ rules:
       program has been tampered with.
     playbook:
       - "If you did not expect this, disconnect from the internet now (turn off Wi-Fi or unplug the network cable)."
-      - "Write down the program name: {{.ImagePath}}"
+      - "{{if .ProcessKnown}}Write down where the program lives — it is shown above.{{else}}NiteWatch could not identify which program made this connection, most likely because it had already exited. The destination below is the part to act on.{{end}}"
       - "Run a full scan with Microsoft Defender (Start → Windows Security → Virus & threat protection → Scan options → Full scan)."
       - "Do not enter passwords on this device until the scan is clean."
       - "If this is a work computer, tell your IT team before doing anything else."
