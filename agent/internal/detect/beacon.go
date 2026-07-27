@@ -46,9 +46,20 @@ const (
 	// defeat exactly this test, so the bar cannot be too tight; ordinary
 	// human-driven traffic is far more variable than 25%.
 	MaxBeaconJitter = 0.25
-	// BeaconMinInterval ignores chatter. Sub-second repetition is a busy
-	// connection, not a check-in schedule.
-	BeaconMinInterval = 5 * time.Second
+	// BeaconMinInterval is the floor below which regularity means nothing.
+	//
+	// Raised from 5s to 30s after a signed desktop app checking in with its own
+	// vendor every 6.8 seconds was reported as command-and-control. Sub-30s
+	// polling is what heartbeats, presence channels, telemetry flushes and
+	// streaming keepalives look like — the interval is short precisely because
+	// the traffic is expected and cheap.
+	//
+	// Real implants sit at the other end of the range: sleep intervals are
+	// conventionally tens of seconds to hours, because a fast beacon is a loud
+	// beacon and operators tune for patience. Anything trying to hide is
+	// already above this floor, so raising it costs almost no detection and
+	// removes an entire class of false alarm.
+	BeaconMinInterval = 30 * time.Second
 	// BeaconMaxInterval bounds how patient we are. Beyond this the window of
 	// observation needed makes the finding unreliable.
 	BeaconMaxInterval = 30 * time.Minute
@@ -179,6 +190,17 @@ func detectBeaconing(s Subject, e *Engine) map[string]any {
 	// all of which poll on timers by design. Regularity there is the product
 	// working, not a signal.
 	if SharedInfrastructure(s.Recon.Org) {
+		return nil
+	}
+	// A signed program talking to its own publisher's network is a desktop app
+	// polling its backend, which is what chat clients, mail clients, AI
+	// assistants and game launchers do all day. Calling that "how remote-control
+	// malware stays in touch" is both wrong and frightening.
+	//
+	// Deliberately NOT "signed is enough": certificates get stolen, and a signed
+	// implant checking in with somebody else's server is precisely what this
+	// detector is for. The publisher must also own the far end.
+	if s.Event.Signed && SignerMatchesOrg(s.Event.Signer, s.Recon.Org) {
 		return nil
 	}
 	dest := s.Domain

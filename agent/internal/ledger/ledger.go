@@ -72,10 +72,29 @@ type DB struct {
 // Open opens (creating if needed) the ledger database at path and applies the
 // schema.
 func Open(path string) (*DB, error) {
-	h, err := sql.Open("sqlite", path)
+	// The collector writes continuously while the dashboard reads on every
+	// refresh, and SQLite's default behaviour under that contention is to fail
+	// the reader immediately with "database is locked" — which surfaced as the
+	// process view dying with a JSON parse error, because the handler returned
+	// that message as plain text.
+	//
+	//   journal_mode(WAL) lets readers proceed during a write instead of
+	//     blocking, which is the actual fix for a read-heavy UI over a
+	//     write-heavy recorder.
+	//   busy_timeout waits for a lock rather than failing instantly. Five
+	//     seconds is far longer than any statement here takes, so in practice
+	//     it converts a hard error into a brief wait.
+	//   synchronous(NORMAL) is the standard companion to WAL: durable across
+	//     application crashes, and we are recording observations, not money.
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+	h, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	// One writer. modernc's driver is safe for concurrent use, but serialising
+	// writes here avoids lock contention rather than merely surviving it, and
+	// the write path is a single goroutine anyway.
+	h.SetMaxOpenConns(4)
 	if _, err := h.Exec(schema); err != nil {
 		h.Close()
 		return nil, err

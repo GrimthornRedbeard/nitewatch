@@ -300,6 +300,22 @@
   const post = (url) => fetch(url, {method: "POST", headers: NW});
   const get = (url) => fetch(url, {headers: {"X-NiteWatch-Token": TOKEN}});
 
+  // Every error response from the API is plain text, not JSON. Calling .json()
+  // on one throws "Unexpected token ... is not valid JSON", which is what the
+  // user saw instead of "database is locked" — a readable, transient problem
+  // rendered as gibberish. Read the body first, and only parse it if the
+  // request actually succeeded.
+  async function getJSON(url) {
+    const r = await get(url);
+    const body = await r.text();
+    if (!r.ok) throw new Error(body.trim() || (r.status + " " + r.statusText));
+    try {
+      return JSON.parse(body);
+    } catch (e) {
+      throw new Error("The agent sent a reply this page could not read.");
+    }
+  }
+
   function shortImage(p) {
     if (!p) return "(unknown)";
     const parts = p.split(/[\\/]/);
@@ -480,7 +496,7 @@
   });
   async function loadSettings() {
     try {
-      const v = await (await get("/api/settings")).json();
+      const v = await getJSON("/api/settings");
       $("s-local").checked = !!v.includeLocal;
       $("s-resolve").checked = !!v.resolveNames;
       $("s-recon").checked = !!v.recon;
@@ -518,7 +534,7 @@
   async function showProcess(image) {
     if (!image) return;
     try {
-      const p = await (await get("/api/process?image=" + encodeURIComponent(image))).json();
+      const p = await getJSON("/api/process?image=" + encodeURIComponent(image));
       $("proc-title").textContent = shortImage(image);
       $("proc-path").innerHTML = `<span class="k">Program:</span> ${esc(image)}`;
       $("proc-stats").innerHTML =
@@ -586,7 +602,7 @@
   async function showStory(c) {
     if (!c.hasStory) return;
     try {
-      const st = await (await get("/api/story?id=" + encodeURIComponent(c.id))).json();
+      const st = await getJSON("/api/story?id=" + encodeURIComponent(c.id));
       $("story-title").textContent = "Why " + shortImage(c.image) + " contacted " +
         (c.domain || c.remoteIP);
       $("story-sub").textContent = (c.asOrg ? c.asOrg + " · " : "") +
@@ -724,7 +740,7 @@
 
   async function refreshStatus() {
     try {
-      const st = await (await get("/api/status")).json();
+      const st = await getJSON("/api/status");
       const b = $("banner");
       if (st.running) { b.className = "banner"; return; }
       b.className = "banner show";
@@ -810,7 +826,7 @@
   }
   async function refreshAlerts() {
     try {
-      const list = await (await get("/api/alerts?limit=50")).json() || [];
+      const list = await getJSON("/api/alerts?limit=50") || [];
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
       box.innerHTML = open.map(alertHTML).join("");
@@ -835,7 +851,7 @@
   // offering none.
   async function loadActions(a) {
     try {
-      const r = await (await get("/api/actions?alert=" + encodeURIComponent(a.id))).json();
+      const r = await getJSON("/api/actions?alert=" + encodeURIComponent(a.id));
       if (!r.available || !(r.actions || []).length) return;
       const box = $("acts-" + a.id);
       if (!box || box.dataset.loaded) return;
