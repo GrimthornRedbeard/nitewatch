@@ -36,14 +36,26 @@
     background: radial-gradient(900px 480px at 50% -140px, rgba(108,182,255,.07), transparent 70%); }
   header, .wrap { position: relative; z-index: 1; }
 
+  /* flex-wrap is load-bearing, not cosmetic. Without it the header's buttons
+     could not fit on a narrow window, so they pushed the header to their own
+     combined width — and because the header is a block in normal flow, that
+     widened the whole document. Every alert below then rendered against a page
+     wider than the screen, which read as "the alerts overflow" when the actual
+     cause was four buttons in a row that would not break. */
   header { padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 14px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     background: rgba(11,14,20,.86); backdrop-filter: blur(10px);
     position: sticky; top: 0; z-index: 20; }
   header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
   header .tag { color: var(--muted); font-size: 14px; }
   @media (max-width: 640px) { header .tag { display: none; } }
-  .wrap { padding: 24px; max-width: 1140px; margin: 0 auto; }
+  /* The table is the product, and it has eleven columns. A 1140px cap left
+     430px of empty page on either side of a 2000px display while clipping
+     Country, Type, Direction, Sent, Received and Activity off the right-hand
+     edge — the columns somebody opens this to read. The cap is now wide enough
+     for the whole table, and prose is constrained separately below so that
+     widening the page does not produce 200-character lines. */
+  .wrap { padding: 24px; max-width: 1720px; margin: 0 auto; }
 
   /* ── buttons: solid, obviously pressable, big enough to hit ───────── */
   .btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
@@ -62,7 +74,7 @@
 
   .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    padding: 16px 20px; min-width: 156px; flex: 1 1 156px;
+    padding: 16px 20px; min-width: 156px; flex: 0 1 220px;
     transition: border-color .18s var(--ease), transform .18s var(--ease); }
   .card:hover { border-color: #3c4867; transform: translateY(-2px); }
   .card .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
@@ -107,24 +119,34 @@
   td.domain { color: var(--accent); font-weight: 600; }
   td.raw { color: var(--muted); font-style: italic; }
   .empty { color: var(--muted); padding: 34px; text-align: center; font-size: 15px; }
-  .foot { color: var(--muted); font-size: 13.5px; margin-top: 16px; line-height: 1.65; }
+  .foot { color: var(--muted); font-size: 13.5px; margin-top: 16px; line-height: 1.65;
+    max-width: 110ch; }
 
   .banner { display: none; margin: 0 0 20px; padding: 15px 18px; border-radius: 12px;
-    border: 1px solid #7a5600; background: #2e2400; color: var(--new); font-size: 15px; }
+    border: 1px solid #7a5600; background: #2e2400; color: var(--new); font-size: 15px;
+    max-width: 110ch; }
   .banner.show { display: block; }
   .banner b { color: #fff; }
-  .tools { margin-left: auto; display: flex; gap: 9px; align-items: center; }
+  .tools { margin-left: auto; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  /* On a phone the controls get their own row rather than competing with the
+     wordmark for space. */
+  @media (max-width: 720px) {
+    header { padding: 14px 16px; gap: 10px; }
+    .tools { margin-left: 0; width: 100%; }
+    .tools .btn, .tools .toggle { flex: 1 1 auto; justify-content: center; }
+    .wrap { padding: 16px; }
+  }
 
   .panel { display: none; background: var(--panel); border: 1px solid var(--line);
     border-radius: 14px; padding: 20px 22px; margin-bottom: 20px; }
   .panel.show { display: block; animation: drop .28s var(--ease); }
   .panel h2 { margin: 0 0 5px; font-size: 18px; font-weight: 700; }
-  .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 100ch; }
   .opt { display: flex; align-items: flex-start; gap: 14px; padding: 13px 0;
     border-top: 1px solid var(--line); }
   .opt:first-of-type { border-top: 0; }
   .opt label { font-weight: 600; font-size: 15.5px; cursor: pointer; }
-  .opt .d { color: var(--muted); font-size: 14px; margin-top: 3px; }
+  .opt .d { color: var(--muted); font-size: 14px; margin-top: 3px; max-width: 100ch; }
   .opt input[type=number] { width: 104px; padding: 9px 11px; background: var(--bg);
     border: 1px solid var(--line); border-radius: 8px; color: var(--fg);
     font: 500 15px var(--sans); }
@@ -162,10 +184,17 @@
   .chain .s { color: var(--accent); font-weight: 600; }
   .chain .d { color: var(--muted); font-size: 14px; font-family: var(--mono); }
 
-  .alerts { margin-bottom: 22px; display: grid; gap: 12px; }
+  .alerts { margin-bottom: 22px; display: grid; gap: 12px; min-width: 0; }
   .alert { border: 1px solid var(--line); border-left-width: 5px; border-radius: 14px;
     background: var(--panel); padding: 17px 20px;
-    animation: rise .34s var(--ease) both; }
+    animation: rise .34s var(--ease) both;
+    /* min-width:0 is required, not tidy-up. A grid item defaults to
+       min-width:auto, meaning it refuses to shrink below its content's
+       min-content width — and because the narrative uses white-space:pre-wrap,
+       that width is its longest unbroken line. The card therefore grew past its
+       own grid track and pushed the page wider than the screen. Zero lets the
+       track constrain it, after which pre-wrap wraps normally. */
+    min-width: 0; }
   .alert.critical { border-left-color: #ff6b6b; }
   .alert.high     { border-left-color: #ffab52; }
   .alert.medium   { border-left-color: var(--new); }
@@ -178,9 +207,12 @@
     background: #333d52; color: var(--muted); vertical-align: 2px; }
   .alert.critical .sev { background: #581919; color: #ffb3b3; }
   .alert.high .sev     { background: #55320f; color: #ffcb96; }
+  /* Line length is capped independently of the page, because a comfortable
+     measure is about 75-90 characters regardless of how wide the monitor is. */
   .alert p { margin: 0 0 12px; color: #dde4f0; font-size: 15.5px; white-space: pre-wrap;
-    line-height: 1.65; }
-  .alert ol { margin: 0; padding-left: 22px; color: #dde4f0; font-size: 15.5px; }
+    line-height: 1.65; max-width: 95ch; overflow-wrap: anywhere; }
+  .alert ol { margin: 0; padding-left: 22px; color: #dde4f0; font-size: 15.5px;
+    max-width: 95ch; overflow-wrap: anywhere; }
   .alert ol li { margin-bottom: 7px; line-height: 1.6; }
   .alert .act { margin-top: 14px; display: flex; gap: 9px; flex-wrap: wrap; }
   .alert .fix { border-color: #3f5f88; background: #17293e; color: #d6e8ff; }
@@ -204,8 +236,10 @@
     border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
   .cause h4 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase;
     letter-spacing: .07em; color: var(--muted); font-weight: 700; }
-  .cause .lin { color: var(--accent); font-family: var(--mono); font-size: 13.5px; }
-  .cause ul { margin: 9px 0 0; padding-left: 20px; color: #dde4f0; }
+  .cause .lin { color: var(--accent); font-family: var(--mono); font-size: 13.5px;
+    overflow-wrap: anywhere; }
+  .cause ul { margin: 9px 0 0; padding-left: 20px; color: #dde4f0;
+    overflow-wrap: anywhere; }
   .cause li { margin-bottom: 4px; }
   .cause .cnt { color: var(--muted); }
   .cause .note { color: var(--muted); margin-top: 10px; font-size: 13px; line-height: 1.55; }
@@ -228,7 +262,7 @@
   .plist li { padding: 9px 0; border-bottom: 1px solid var(--line); display: flex;
     gap: 12px; flex-wrap: wrap; }
   .plist li:last-child { border-bottom: none; }
-  .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; font-size: 14px; }
+  .plist .g { color: var(--muted); margin-left: auto; font-size: 14px; }
   .why { color: var(--muted); font-size: 13.5px; margin-top: 18px;
     border-top: 1px solid var(--line); padding-top: 14px; line-height: 1.6; }
 
