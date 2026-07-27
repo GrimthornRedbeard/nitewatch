@@ -15,9 +15,6 @@ rules:
       {{.ProcessName}} connected to {{.Destination}}. That server is
       {{.FeedReason}}.
 
-      The program is:
-        {{.ImagePath}}
-
       Programs contact servers like this when someone else is controlling them
       remotely — which usually means this program is malicious, or a legitimate
       program has been tampered with.
@@ -43,9 +40,6 @@ rules:
 
       Either part alone would be unremarkable. Together they are worth a look:
       software with no publisher, reaching an address it never asked for by name.
-
-      The program is:
-        {{.ImagePath}}
     playbook:
       - "Do you recognise {{.ProcessName}}? If not, look it up before doing anything else."
       - "Check who owns the address it contacted: {{.RemoteIP}}{{if .Owner}} (currently registered to {{.Owner}}){{end}}."
@@ -64,12 +58,11 @@ rules:
 
       Plenty of small and homemade tools are unsigned, so this on its own is not
       proof of anything — but unsigned software reaching out to the internet is
-      worth a second look. Where it lives matters as much as its name:
-
-        {{.ImagePath}}
+      worth a second look. Where it lives matters as much as its name, so check
+      the location shown below.
     playbook:
       - "Do you recognise {{.ProcessName}} and expect it to use the internet?"
-      - "If not, find where it came from: {{.ImagePath}}"
+      - "If not, look at where it came from — the full location is shown above."
       - "If you did not install it deliberately, run a full Microsoft Defender scan."
 
   - id: c2-foreign-first-contact
@@ -85,9 +78,6 @@ rules:
       hosted internationally. It is flagged because it is the first time this
       program has gone there, and unexpected foreign connections are worth a
       glance.
-
-      The program is:
-        {{.ImagePath}}
     playbook:
       - "Does {{.ProcessName}} have a reason to talk to a server in {{.Country}}?"
       - "If it is a browser, a game, or a messaging app, this is probably normal."
@@ -107,9 +97,6 @@ rules:
       the program took your secrets and then sent something of about that size
       to someone else. Assume the contents of those files are now known to
       whoever runs that server.
-
-      The program is:
-        {{.ImagePath}}
     playbook:
       - "Disconnect this device from the internet now."
       - "From a DIFFERENT device, change your important passwords — email and banking first."
@@ -131,9 +118,6 @@ rules:
       schedule, which is how remote-control malware stays in touch with whoever
       installed it. Some legitimate software polls on a timer too, so the
       question is whether you recognise this program.
-
-      The program is:
-        {{.ImagePath}}
     playbook:
       - "Do you recognise {{.ProcessName}}? If not, treat this seriously."
       - "Block the connection using the button below — it stops the check-ins without removing anything."

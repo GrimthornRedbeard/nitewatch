@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/detect"
+	"github.com/threattape/nitewatch/agent/internal/explain"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
@@ -154,6 +155,7 @@ func (s *Server) Handler() http.Handler {
 	// outbound request that tells a registry what the user is looking at.
 	// Nothing should be able to trigger it by embedding a URL.
 	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
+	mux.HandleFunc("/api/explain", s.handleExplain)
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -355,6 +357,24 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, reg)
+}
+
+// handleExplain serves the plain-English layer: what a program is, and what the
+// jargon on screen means. Answered entirely from a table compiled into the
+// binary — no lookup leaves the machine, and nothing here influences detection.
+func (s *Server) handleExplain(w http.ResponseWriter, r *http.Request) {
+	if image := r.URL.Query().Get("image"); image != "" {
+		p, ok := explain.ForImage(image)
+		if !ok {
+			// Silence is the correct answer for something we do not recognise.
+			// Guessing would be a confident lie to somebody with no way to check.
+			writeJSON(w, map[string]any{"known": false})
+			return
+		}
+		writeJSON(w, map[string]any{"known": true, "program": p})
+		return
+	}
+	writeJSON(w, map[string]any{"terms": explain.AllTerms()})
 }
 
 type alertDTO struct {

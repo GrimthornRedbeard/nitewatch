@@ -6,184 +6,278 @@
 <title>NiteWatch — Who's Talking?</title>
 <style>
   :root {
-    --bg: #0b0e14; --panel: #131824; --line: #232a3a; --fg: #e6e9f0;
-    --muted: #8a93a6; --accent: #4da3ff; --new: #ffcf5c;
+    /* Lifted for legibility. The old --muted (#8a93a6) at 11-12px was the main
+       complaint: technically ~6:1 contrast, but unreadable in practice because
+       the type was too small and too light at the same time. Everything here is
+       one step brighter and one step larger. */
+    --bg: #0b0e14; --panel: #161c2a; --panel-2: #1d2536; --line: #2c3549;
+    --fg: #f2f5fa; --muted: #aab6cc; --dim: #8593aa;
+    --accent: #6cb6ff; --accent-ink: #04121f; --new: #ffd36b;
+    --ok: #7ee2a8; --bad: #ff9b9b;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text",
+            "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+    --r: 10px;
+    --ease: cubic-bezier(.2,.7,.3,1);
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  header { padding: 18px 22px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 14px; }
-  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
-  header .tag { color: var(--muted); font-size: 13px; }
-  .wrap { padding: 22px; max-width: 1100px; margin: 0 auto; }
-  .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 14px 16px; min-width: 150px; }
-  .card .n { font-size: 24px; font-weight: 600; }
-  .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  .controls { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  select { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; color: var(--fg); font-size: 13px; }
-  input[type=search] { flex: 1 1 320px; padding: 10px 12px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-size: 14px; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 10px 14px;
-    font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
+    font: 500 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility; }
+  /* Ambient depth so the page doesn't read as a flat black rectangle. */
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(900px 480px at 50% -140px, rgba(108,182,255,.07), transparent 70%); }
+  header, .wrap { position: relative; z-index: 1; }
+
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(11,14,20,.86); backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 20; }
+  header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
+  header .tag { color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) { header .tag { display: none; } }
+  .wrap { padding: 24px; max-width: 1140px; margin: 0 auto; }
+
+  /* ── buttons: solid, obviously pressable, big enough to hit ───────── */
+  .btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
+    padding: 10px 16px; border-radius: var(--r); font: 600 14px/1.2 var(--sans);
+    cursor: pointer; min-height: 40px; display: inline-flex; align-items: center;
+    gap: 7px; transition: background .16s var(--ease), border-color .16s var(--ease),
+    transform .12s var(--ease); }
+  .btn:hover { background: #26304a; border-color: #47587c; }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: #8ac5ff; border-color: #8ac5ff; }
+  .btn.danger { background: #3a1a1a; border-color: #6f3030; color: #ffc4c4; }
+  .btn.danger:hover { background: #4d2222; border-color: #9a4141; }
+
+  .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 20px; min-width: 156px; flex: 1 1 156px;
+    transition: border-color .18s var(--ease), transform .18s var(--ease); }
+  .card:hover { border-color: #3c4867; transform: translateY(-2px); }
+  .card .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; }
+  .card .l { color: var(--muted); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .07em; margin-top: 2px; }
+
+  .controls { margin-bottom: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  select, input[type=search] { padding: 11px 14px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r); color: var(--fg);
+    font: 500 15px var(--sans); min-height: 44px; }
+  input[type=search] { flex: 1 1 320px; }
+  select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r);
+    overflow: hidden; }
+  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 11px 16px;
+    font: 600 14px var(--sans); cursor: pointer; border-right: 1px solid var(--line);
+    min-height: 44px; transition: background .16s var(--ease), color .16s var(--ease); }
   .seg button:last-child { border-right: 0; }
-  .seg button.on { background: var(--accent); color: #05121f; font-weight: 600; }
-  .flag { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 11px;
-    font-weight: 600; letter-spacing: .3px; background: #3a1c1c; color: #ff8f8f;
-    border: 1px solid #6a2a2a; margin-left: 6px; }
+  .seg button:hover { color: var(--fg); background: var(--panel-2); }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); }
+
+  .flag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px;
+    font-weight: 700; letter-spacing: .04em; background: #4a1c1c; color: #ffb3b3;
+    border: 1px solid #7a2f2f; margin-left: 8px; vertical-align: 1px; }
   td.owner { color: var(--fg); }
-  td.cc { font-variant: small-caps; letter-spacing: .5px; }
+  td.cc { font-variant: small-caps; letter-spacing: .04em; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel);
-    min-width: 900px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase;
-    letter-spacing: .5px; cursor: pointer; user-select: none; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 940px; }
+  th, td { text-align: left; padding: 13px 15px; border-bottom: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
+    font-size: 15px; }
+  th { color: var(--muted); font-weight: 700; font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .07em; cursor: pointer; user-select: none;
+    background: var(--panel-2); position: sticky; top: 0; }
   th:hover { color: var(--fg); }
-  th .arrow { opacity: .45; font-size: 10px; margin-left: 4px; }
+  th .arrow { opacity: .5; font-size: 11px; margin-left: 5px; }
   th.sorted { color: var(--accent); }
   th.sorted .arrow { opacity: 1; }
   tr:last-child td { border-bottom: none; }
-  td.domain { color: var(--accent); }
+  td.domain { color: var(--accent); font-weight: 600; }
   td.raw { color: var(--muted); font-style: italic; }
-  .empty { color: var(--muted); padding: 30px; text-align: center; }
-  .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
-  .banner { display: none; margin: 0 0 18px; padding: 12px 16px; border-radius: 10px;
-    border: 1px solid #6a4a00; background: #2a2000; color: var(--new); }
+  .empty { color: var(--muted); padding: 34px; text-align: center; font-size: 15px; }
+  .foot { color: var(--muted); font-size: 13.5px; margin-top: 16px; line-height: 1.65; }
+
+  .banner { display: none; margin: 0 0 20px; padding: 15px 18px; border-radius: 12px;
+    border: 1px solid #7a5600; background: #2e2400; color: var(--new); font-size: 15px; }
   .banner.show { display: block; }
   .banner b { color: #fff; }
-  .tools { margin-left: auto; display: flex; gap: 8px; }
-  .btn { background: var(--panel); border: 1px solid var(--line); color: var(--fg);
-    padding: 7px 13px; border-radius: 8px; font-size: 13px; cursor: pointer; }
-  .btn:hover { border-color: var(--accent); }
+  .tools { margin-left: auto; display: flex; gap: 9px; align-items: center; }
+
   .panel { display: none; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
-  .panel.show { display: block; }
-  .panel h2 { margin: 0 0 4px; font-size: 15px; }
-  .panel .hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
-  .opt { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+    border-radius: 14px; padding: 20px 22px; margin-bottom: 20px; }
+  .panel.show { display: block; animation: drop .28s var(--ease); }
+  .panel h2 { margin: 0 0 5px; font-size: 18px; font-weight: 700; }
+  .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  .opt { display: flex; align-items: flex-start; gap: 14px; padding: 13px 0;
     border-top: 1px solid var(--line); }
   .opt:first-of-type { border-top: 0; }
-  .opt label { font-weight: 500; }
-  .opt .d { color: var(--muted); font-size: 12px; }
-  .opt input[type=number] { width: 90px; padding: 6px 8px; background: var(--bg);
-    border: 1px solid var(--line); border-radius: 6px; color: var(--fg); }
+  .opt label { font-weight: 600; font-size: 15.5px; cursor: pointer; }
+  .opt .d { color: var(--muted); font-size: 14px; margin-top: 3px; }
+  .opt input[type=number] { width: 104px; padding: 9px 11px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; color: var(--fg);
+    font: 500 15px var(--sans); }
   .opt .ctl { margin-left: auto; }
-  .saved { color: #7ddc9a; font-size: 12px; margin-left: 10px; }
+  /* Checkboxes were 13px system defaults — impossible to hit and hard to read. */
+  input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+  .saved { color: var(--ok); font-size: 14px; margin-left: 12px; font-weight: 600; }
+
   tr.clickable { cursor: pointer; }
-  tr.clickable:hover td { background: #1a2130; }
-  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
-    align-items: center; justify-content: center; padding: 20px; z-index: 10; }
-  .modal.show { display: flex; }
+  tr.clickable:hover td { background: #202a3d; }
+
+  .modal { display: none; position: fixed; inset: 0; background: rgba(2,4,8,.72);
+    align-items: center; justify-content: center; padding: 20px; z-index: 40;
+    backdrop-filter: blur(3px); }
+  .modal.show { display: flex; animation: fade .2s var(--ease); }
   .modal .box { background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; max-width: 720px; width: 100%; max-height: 85vh;
-    overflow: auto; padding: 20px 22px; }
-  .tale { font-size: 14px; line-height: 1.6; color: #e8edf6; margin: 14px 0 0;
-    padding: 14px 16px; background: #0e1420; border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0; }
-  .stepstoggle { margin-top: 12px; font-size: 12px; color: var(--muted);
-    cursor: pointer; user-select: none; }
-  .stepstoggle:hover { color: var(--fg); }
-  .chain { list-style: none; margin: 14px 0 0; padding: 0; }
-  .chain li { position: relative; padding: 0 0 18px 26px; border-left: 2px solid var(--line); }
+    border-radius: 16px; max-width: 760px; width: 100%; max-height: 86vh;
+    overflow: auto; padding: 24px 26px; box-shadow: 0 26px 70px rgba(0,0,0,.6);
+    animation: rise .26s var(--ease); }
+  .modal h2 { font-size: 19px; font-weight: 700; }
+
+  .tale { font-size: 16.5px; line-height: 1.72; color: #f2f5fa; margin: 16px 0 0;
+    padding: 16px 18px; background: #101725; border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0; }
+  .stepstoggle { margin-top: 14px; font-size: 14px; color: var(--accent);
+    cursor: pointer; user-select: none; font-weight: 600; }
+  .stepstoggle:hover { text-decoration: underline; }
+  .chain { list-style: none; margin: 16px 0 0; padding: 0; }
+  .chain li { position: relative; padding: 0 0 20px 28px; border-left: 2px solid var(--line); }
   .chain li:last-child { border-left-color: transparent; padding-bottom: 0; }
-  .chain li::before { content: ""; position: absolute; left: -7px; top: 4px;
-    width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
-  .chain .k { font-weight: 600; }
-  .chain .s { color: var(--accent); }
-  .chain .d { color: var(--muted); font-size: 12px; }
-  .alerts { margin-bottom: 20px; }
-  .alert { border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px;
-    background: var(--panel); padding: 13px 16px; margin-bottom: 10px; }
-  .alert.critical { border-left-color: #ff5f5f; }
-  .alert.high     { border-left-color: #ff9f43; }
-  .alert.medium   { border-left-color: #ffcf5c; }
-  .alert.low      { border-left-color: #6b7a90; }
-  .alert h3 { margin: 0 0 6px; font-size: 14px; }
-  .alert .when { float: right; color: var(--muted); font-size: 11px; font-weight: 400; }
-  .alert .stale { color: #ffcf5c; }
-  .alert .sev { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .6px;
-    text-transform: uppercase; padding: 2px 7px; border-radius: 4px; margin-right: 8px;
-    background: #2a2f3d; color: var(--muted); vertical-align: 2px; }
-  .alert.critical .sev { background: #4a1414; color: #ff8f8f; }
-  .alert.high .sev     { background: #45280c; color: #ffb87a; }
-  .alert p { margin: 0 0 10px; color: #cfd6e4; font-size: 13px; white-space: pre-wrap; }
-  .alert ol { margin: 0; padding-left: 20px; color: #cfd6e4; font-size: 13px; }
-  .alert ol li { margin-bottom: 4px; }
-  .alert .act { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .alert .fix { border-color: #3d5a80; background: #16283d; color: #cfe4ff; }
-  .alert .fix:hover { border-color: var(--accent); }
-  .alert .fix.hard { border-color: #6a2a2a; background: #2a1414; color: #ffb3b3; }
-  .prog { margin: 8px 0 0; font-size: 12px; font-family: ui-monospace, monospace;
-    color: #cfd6e4; word-break: break-all; }
-  .prog .k { color: var(--muted); font-family: inherit; }
-  .prog .odd { color: var(--new); }
-  .cause { margin: 10px 0 0; padding: 10px 12px; background: #0e1420;
-    border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
-  .cause h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .5px; color: var(--muted); font-weight: 600; }
-  .cause .lin { color: var(--accent); font-family: ui-monospace, monospace; font-size: 12px; }
-  .cause ul { margin: 8px 0 0; padding-left: 18px; color: #cfd6e4; }
+  .chain li::before { content: ""; position: absolute; left: -8px; top: 4px;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(108,182,255,.16); }
+  .chain .k { font-weight: 700; }
+  .chain .s { color: var(--accent); font-weight: 600; }
+  .chain .d { color: var(--muted); font-size: 14px; font-family: var(--mono); }
+
+  .alerts { margin-bottom: 22px; display: grid; gap: 12px; }
+  .alert { border: 1px solid var(--line); border-left-width: 5px; border-radius: 14px;
+    background: var(--panel); padding: 17px 20px;
+    animation: rise .34s var(--ease) both; }
+  .alert.critical { border-left-color: #ff6b6b; }
+  .alert.high     { border-left-color: #ffab52; }
+  .alert.medium   { border-left-color: var(--new); }
+  .alert.low      { border-left-color: #7c8aa3; }
+  .alert h3 { margin: 0 0 9px; font-size: 17px; font-weight: 700; line-height: 1.35; }
+  .alert .when { float: right; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .alert .stale { color: var(--new); }
+  .alert .sev { display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 6px; margin-right: 10px;
+    background: #333d52; color: var(--muted); vertical-align: 2px; }
+  .alert.critical .sev { background: #581919; color: #ffb3b3; }
+  .alert.high .sev     { background: #55320f; color: #ffcb96; }
+  .alert p { margin: 0 0 12px; color: #dde4f0; font-size: 15.5px; white-space: pre-wrap;
+    line-height: 1.65; }
+  .alert ol { margin: 0; padding-left: 22px; color: #dde4f0; font-size: 15.5px; }
+  .alert ol li { margin-bottom: 7px; line-height: 1.6; }
+  .alert .act { margin-top: 14px; display: flex; gap: 9px; flex-wrap: wrap; }
+  .alert .fix { border-color: #3f5f88; background: #17293e; color: #d6e8ff; }
+  .alert .fix:hover { border-color: var(--accent); background: #1d3450; }
+  .alert .fix.hard { border-color: #7a3030; background: #331717; color: #ffbcbc; }
+  .alert .fix.hard:hover { border-color: #a34545; background: #431d1d; }
+  .alert.acked { opacity: .58; }
+
+  .prog { margin: 10px 0 0; font-size: 13.5px; font-family: var(--mono);
+    color: #dde4f0; word-break: break-all; background: #101725;
+    border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; line-height: 1.55; }
+  .prog .k { color: var(--muted); font-family: var(--sans); font-weight: 600; }
+  .prog .odd { color: var(--new); font-family: var(--sans); }
+
+  .cause { margin: 12px 0 0; padding: 13px 15px; background: #101725;
+    border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  .cause h4 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+  .cause .lin { color: var(--accent); font-family: var(--mono); font-size: 13.5px; }
+  .cause ul { margin: 9px 0 0; padding-left: 20px; color: #dde4f0; }
+  .cause li { margin-bottom: 4px; }
   .cause .cnt { color: var(--muted); }
-  .cause .note { color: var(--muted); margin-top: 8px; font-size: 11px; }
-  .actmsg { font-size: 12px; margin-top: 8px; color: #7ddc9a; }
-  .actmsg.bad { color: #ff9f9f; }
-  .alert.acked { opacity: .55; }
-  /* Clickable things must LOOK clickable. The causal data was previously
-     reachable only by guessing that rows respond to a click. */
-  td.proc { color: var(--accent); cursor: pointer; }
+  .cause .note { color: var(--muted); margin-top: 10px; font-size: 13px; line-height: 1.55; }
+  .actmsg { font-size: 14px; margin-top: 10px; color: var(--ok); font-weight: 600; }
+  .actmsg.bad { color: var(--bad); }
+
+  td.proc { color: var(--accent); cursor: pointer; font-weight: 600; }
   td.proc:hover { text-decoration: underline; }
-  td.proc::after { content: " ›"; opacity: .5; }
-  .pstat { display: flex; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px;
-    padding: 12px 14px; background: #0e1420; border: 1px solid var(--line); border-radius: 8px; }
-  .pstat div .n { font-size: 18px; font-weight: 600; }
-  .pstat div .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .psec { margin-top: 18px; }
-  .psec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
-    color: var(--muted); margin: 0 0 8px; }
-  .plist { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  .plist li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  td.proc::after { content: " ›"; opacity: .6; }
+
+  .pstat { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0 4px;
+    padding: 15px 18px; background: #101725; border: 1px solid var(--line); border-radius: 12px; }
+  .pstat div .n { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pstat div .l { font-size: 12.5px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .07em; font-weight: 600; }
+  .psec { margin-top: 22px; }
+  .psec h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 700; }
+  .plist { list-style: none; margin: 0; padding: 0; font-size: 15px; }
+  .plist li { padding: 9px 0; border-bottom: 1px solid var(--line); display: flex;
+    gap: 12px; flex-wrap: wrap; }
   .plist li:last-child { border-bottom: none; }
-  .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; }
-  .why { color: var(--muted); font-size: 12px; margin-top: 16px;
-    border-top: 1px solid var(--line); padding-top: 12px; }
-  /* Registration lookup. Deliberately set apart from everything else on the
-     page, because everything else is answered from this machine alone and this
-     one is not. The warning is part of the control, not a footnote. */
-  .lookup { margin-top: 14px; }
-  .lookup .ext { display: block; color: var(--muted); font-size: 11px; margin-top: 6px;
-    max-width: 62ch; line-height: 1.5; }
-  .lookup .btn.ext-btn { border-color: #4a5a7a; }
-  .lookup .res { margin-top: 12px; padding: 12px 14px; background: #0e1420;
-    border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; font-size: 14px; }
+  .why { color: var(--muted); font-size: 13.5px; margin-top: 18px;
+    border-top: 1px solid var(--line); padding-top: 14px; line-height: 1.6; }
+
+  .lookup { margin-top: 16px; }
+  .lookup .ext { display: block; color: var(--muted); font-size: 13.5px; margin-top: 8px;
+    max-width: 62ch; line-height: 1.6; }
+  .lookup .btn.ext-btn { border-color: #4f6288; }
+  .lookup .res { margin-top: 14px; padding: 15px 17px; background: #101725;
+    border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; }
   .lookup .res dl { display: grid; grid-template-columns: max-content 1fr;
-    gap: 4px 14px; margin: 0; }
-  .lookup .res dt { color: var(--muted); font-size: 11px; text-transform: uppercase;
-    letter-spacing: .5px; padding-top: 2px; }
+    gap: 7px 18px; margin: 0; }
+  .lookup .res dt { color: var(--muted); font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .06em; padding-top: 2px; font-weight: 700; }
   .lookup .res dd { margin: 0; overflow-wrap: anywhere; }
-  .lookup .res .note { margin: 0 0 10px; color: #ffd48a; }
+  .lookup .res .note { margin: 0 0 12px; color: #ffdf9e; line-height: 1.6; }
   .lookup .res .note.old { color: var(--muted); }
-  .lookup .res .src { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
-  .lookup .err { margin-top: 10px; color: #ff9f9f; font-size: 12px; }
-  /* Per-destination lookup inside the process view. */
-  .plist .lk { background: none; border: 1px solid var(--line); color: var(--muted);
-    border-radius: 5px; font-size: 11px; padding: 1px 7px; cursor: pointer; margin-left: 8px; }
-  .plist .lk:hover { color: var(--fg); border-color: var(--accent); }
-  .plist li { flex-wrap: wrap; }
+  .lookup .res .src { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+  .lookup .err { margin-top: 12px; color: var(--bad); font-size: 14px; }
+  .plist .lk { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 7px; font: 600 13px var(--sans); padding: 5px 11px; cursor: pointer;
+    margin-left: 10px; min-height: 32px; }
+  .plist .lk:hover { color: var(--fg); border-color: var(--accent); background: #26304a; }
   .plist .lkres { flex-basis: 100%; }
+
+  /* ── plain-English help ───────────────────────────────────────────── */
+  /* Off by default: an experienced user should never be bombarded with these. */
+  .whatis { color: var(--muted); font-size: 14.5px; margin: 6px 0 0; line-height: 1.6; }
+  .whatis b { color: var(--fg); font-weight: 700; }
+  body:not(.plain) .plain-only { display: none !important; }
+  /* A dotted underline on a defined term, only in plain mode. */
+  body.plain .term { border-bottom: 2px dotted var(--dim); cursor: help; }
+  body.plain .term:hover { border-bottom-color: var(--accent); color: var(--fg); }
+  .gloss { display: grid; gap: 16px; }
+  .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
+  .gloss dd { margin: 4px 0 0; color: #dde4f0; font-size: 15px; line-height: 1.65; }
+  .toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+    font-weight: 600; font-size: 14px; color: var(--muted); user-select: none; }
+  .toggle:hover { color: var(--fg); }
+  .toggle input { width: 20px; height: 20px; }
+
+  @keyframes fade { from { opacity: 0 } }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) } }
+  @keyframes drop { from { opacity: 0; transform: translateY(-8px) } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>NiteWatch</h1>
   <span class="tag">Who's talking? — outbound connection ledger</span>
-  <div class="tools"><button class="btn" id="settings-btn">Settings</button></div>
+  <div class="tools">
+    <label class="toggle" title="Explain programs and technical words in plain English">
+      <input type="checkbox" id="plain-toggle">
+      Explain everything
+    </label>
+    <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
+    <button class="btn" id="settings-btn">Settings</button>
+  </div>
 </header>
 <div class="wrap">
   <div id="banner" class="banner"></div>
@@ -241,12 +335,12 @@
   <table>
     <thead><tr id="thead">
       <th data-k="lastSeen">Last seen</th>
-      <th data-k="image">Process</th>
-      <th data-k="domain">Destination</th>
-      <th data-k="remoteIP">IP:Port</th>
-      <th data-k="asOrg" title="Who owns the address block (autonomous system)">Owner</th>
+      <th data-k="image" data-term="process">Program</th>
+      <th data-k="domain" data-term="domain">Destination</th>
+      <th data-k="remoteIP" data-term="ip">IP:Port</th>
+      <th data-k="asOrg" data-term="asn" title="Who owns the address block (autonomous system)">Owner</th>
       <th data-k="country" title="Country the address block is registered to">Country</th>
-      <th data-k="proto">Proto</th>
+      <th data-k="proto" data-term="tcp">Type</th>
       <th data-k="inbound" title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
       <th data-k="bytesSent" title="How much this PC SENT to that destination. Volume is visible even when the contents are encrypted.">Sent</th>
       <th data-k="bytesRecv" title="How much this PC received">Received</th>
@@ -262,10 +356,20 @@
     connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
 </div>
 
+<div class="modal" id="gloss-modal">
+  <div class="box">
+    <h2>What do these words mean?</h2>
+    <p class="hint">Every technical word this page uses, in plain English.</p>
+    <dl class="gloss" id="gloss-body"></dl>
+    <div style="margin-top:20px"><button class="btn primary" id="gloss-close">Close</button></div>
+  </div>
+</div>
+
 <div class="modal" id="proc-modal">
   <div class="box">
-    <h2 id="proc-title" style="margin:0 0 4px;font-size:15px"></h2>
+    <h2 id="proc-title"></h2>
     <div class="prog" id="proc-path"></div>
+    <p class="whatis plain-only" id="proc-whatis"></p>
     <div class="pstat" id="proc-stats"></div>
     <div id="proc-body"></div>
     <div style="margin-top:16px"><button class="btn" id="proc-close">Close</button></div>
@@ -394,8 +498,10 @@
     for (const th of $("thead").children) {
       const on = th.dataset.k === sortKey;
       th.classList.toggle("sorted", on);
-      const label = th.textContent.replace(/[\u25b2\u25bc]\s*$/, "").trim();
-      th.innerHTML = esc(label) + (on ? `<span class="arrow">${sortDesc ? "\u25bc" : "\u25b2"}</span>` : "");
+      const label = (th.dataset.label ||= th.textContent.replace(/[\u25b2\u25bc]\s*$/, "").trim());
+      const term = th.dataset.term ? termAttr(th.dataset.term) : "";
+      const head = term ? `<span${term}>${esc(label)}</span>` : esc(label);
+      th.innerHTML = head + (on ? `<span class="arrow">${sortDesc ? "\u25bc" : "\u25b2"}</span>` : "");
     }
   }
 
@@ -531,12 +637,87 @@
 
   // --- causal story ---
   // Everything known about one program, in one place.
+  // ── plain-English help ────────────────────────────────────────────
+  // Off by default. Somebody who knows what a PID is should never have to look
+  // at a definition of one, so this adds nothing to the page until asked.
+  const PLAIN_KEY = "nitewatch.plain";
+  let TERMS = null;
+
+  function setPlain(on) {
+    document.body.classList.toggle("plain", on);
+    $("plain-toggle").checked = on;
+    try { localStorage.setItem(PLAIN_KEY, on ? "1" : "0"); } catch (e) { /* private mode */ }
+    paintHeaders();  // header tooltips depend on the mode
+    render();
+  }
+  $("plain-toggle").addEventListener("change", async (e) => {
+    if (e.target.checked) await loadTerms();
+    setPlain(e.target.checked);
+  });
+
+  async function loadTerms() {
+    if (TERMS) return TERMS;
+    try {
+      const d = await getJSON("/api/explain");
+      TERMS = d.terms || {};
+    } catch (e) {
+      TERMS = {};
+    }
+    return TERMS;
+  }
+
+  // A short definition attached to a column heading or label, shown only in
+  // plain mode so it never clutters the view for someone who doesn't want it.
+  function termAttr(key) {
+    if (!document.body.classList.contains("plain") || !TERMS) return "";
+    const t = TERMS[key];
+    return t ? ` class="term" title="${esc(t.term)}: ${esc(t.short)}"` : "";
+  }
+
+  async function paintWhatIs(image) {
+    const el = $("proc-whatis");
+    el.textContent = "";
+    if (!document.body.classList.contains("plain")) return;
+    try {
+      const d = await getJSON("/api/explain?image=" + encodeURIComponent(image));
+      if (!d.known) {
+        // Saying nothing is the honest answer. An invented description would be
+        // a confident lie to somebody with no way to check it.
+        el.innerHTML = `<b>We don't have a description for this one.</b> That by itself
+          means nothing — most programs on a computer are not on any list. What matters
+          is the rest of this page: where it connects, and whether you started it.`;
+        return;
+      }
+      const p = d.program;
+      let html = `<b>${esc(p.name)}</b> — ${esc(p.what)}`;
+      if (p.publisher) html += ` Made by ${esc(p.publisher)}.`;
+      if (p.system) html += ` This is part of Windows itself, not something you installed.`;
+      if (p.expected) html += `<br><b>What's normal for it:</b> ${esc(p.expected)}`;
+      el.innerHTML = html;
+    } catch (e) {
+      el.textContent = "";
+    }
+  }
+
+  $("gloss-btn").addEventListener("click", async () => {
+    const terms = await loadTerms();
+    const keys = Object.keys(terms).sort((a, b) => terms[a].term.localeCompare(terms[b].term));
+    $("gloss-body").innerHTML = keys.map(k =>
+      `<div><dt>${esc(terms[k].term)}</dt><dd>${esc(terms[k].long)}</dd></div>`).join("");
+    $("gloss-modal").classList.add("show");
+  });
+  $("gloss-close").addEventListener("click", () => $("gloss-modal").classList.remove("show"));
+  $("gloss-modal").addEventListener("click", (e) => {
+    if (e.target === $("gloss-modal")) $("gloss-modal").classList.remove("show");
+  });
+
   async function showProcess(image) {
     if (!image) return;
     try {
       const p = await getJSON("/api/process?image=" + encodeURIComponent(image));
       $("proc-title").textContent = shortImage(image);
       $("proc-path").innerHTML = `<span class="k">Program:</span> ${esc(image)}`;
+      await paintWhatIs(image);
       $("proc-stats").innerHTML =
         stat(p.destinations, "destinations") +
         stat(bytes(p.bytesSent), "sent") +
@@ -899,6 +1080,15 @@
     refreshStatus();
   }
   $("filter").addEventListener("input", render);
+
+  // Restore the plain-English preference before the first paint, so the page
+  // does not flash from one mode to the other.
+  (async () => {
+    let want = false;
+    try { want = localStorage.getItem(PLAIN_KEY) === "1"; } catch (e) { /* private mode */ }
+    if (want) { await loadTerms(); setPlain(true); }
+  })();
+
   paintHeaders();
   refresh();
   setInterval(refresh, 5000);
