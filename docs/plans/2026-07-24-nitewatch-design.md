@@ -17,7 +17,7 @@ rewriting your Documents folder" — with one-click "Do this" remediation.
 
 | Decision | Choice | Alternatives considered |
 |---|---|---|
-| v1 platform | **Windows** (ETW telemetry, userland) | Linux (eBPF, tiny consumer market), macOS (EndpointSecurity entitlement gauntlet), cross-platform day-1 (triples sensor work) |
+| Platform | **Windows, permanently** (ETW telemetry, userland). Originally scoped as "v1 platform"; the other two were assessed on 2026-07-27 and **taken off the roadmap** — see `2026-07-27-cross-platform-assessment.md` for the reasoning and the reopen triggers. | Linux (eBPF, tiny consumer market — and, per the 2026-07-27 assessment, no reliable per-process DNS and no code-signing equivalent to anchor the publisher allowlist), macOS (EndpointSecurity entitlement gauntlet), cross-platform day-1 (triples sensor work) |
 | Response mode | **Advise + one-click respond** — userland observation, agent executes remediation on user click via standard OS facilities. No kernel driver, no WHQL signing. | Advise-only (weaker product), full active blocking (requires signed minifilter/WFP drivers; competes with Defender head-on) |
 | Local vs cloud | **Local + public feeds** — all telemetry/analysis on-device; agent pulls down free intel feeds; optional anonymous hash lookups user can disable | 100% air-gapped (stale intel), cloud-assisted (privacy irony, PII infrastructure burden) |
 | Engine | **All-Go on GoRapide** (github.com/ShaneDolphin/gorapide, MIT) — single static exe; GoRapide poset = causal graph; its pattern/constraint packages = detection-rule engine; Mermaid/DOT export drives the story UI | Go sensors + PyRapide analyzer (two runtimes, Python-on-Windows packaging pain), bespoke engine (more control, more work) |

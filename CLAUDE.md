@@ -48,8 +48,14 @@ engine, detections, UX, advisory generation) are recorded there with alternative
   Firewall rules, ACLs) and must have an undo path where one exists.
 - **False-positive budget is a first-class test target** — a week-long "quiet machine"
   soak must produce zero alerts.
+- **Windows only — settled scope, not a gap.** macOS and Linux were assessed
+  2026-07-27 and taken off the roadmap (`docs/plans/2026-07-27-cross-platform-assessment.md`).
+  Do not propose, plan, or scaffold for either. Do not file the Apple
+  EndpointSecurity entitlement request.
 - Dev box is WSL2/Linux; Windows-specific behavior (ETW, toasts, service install)
-  needs a Windows VM or test host — cross-compile with `GOOS=windows`.
+  needs a Windows VM or test host — cross-compile with `GOOS=windows`. **The
+  CGO-free build and the non-Windows stubs exist for this dev loop, not as a
+  hedge on a future port** — keep them working, they are why the suite runs here.
 
 ## Phasing (see design doc for detail)
 

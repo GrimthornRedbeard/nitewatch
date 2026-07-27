@@ -97,7 +97,14 @@ specifically.
 - **No automatic response.** Every remediation requires a click. A false
   positive that kills a needed process is worse than the malware being guessed
   at.
-- **Windows only.** macOS and Linux would need entirely different sensors.
+- **Windows only, and staying that way.** macOS and Linux were assessed on
+  2026-07-27 and taken off the roadmap; NiteWatch is a Windows product. This is
+  a settled scope decision, not a gap awaiting work. The short version: Linux
+  cannot reliably attribute DNS lookups to a process — which is the headline
+  feature — and has no code-signing equivalent, so the publisher allowlist that
+  keeps the noise down has nothing to stand on; macOS needs an Apple
+  entitlement that cannot be relied on. Full reasoning and the reopen triggers
+  are in `docs/plans/2026-07-27-cross-platform-assessment.md`.
 
 ---
 

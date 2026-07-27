@@ -1,9 +1,38 @@
 # NiteWatch — Linux and macOS Port Assessment
 
 **Date:** 2026-07-27
-**Status:** Assessment for decision. No implementation proposed or begun.
+**Status:** ❌ **DECIDED — NOT DOING IT. Both platforms are off the roadmap (Kevin,
+2026-07-27).** NiteWatch is a Windows product. This document is retained as the
+record of why, and as the starting point if the decision is ever revisited.
 **Question asked:** what would it take to build Linux and/or macOS versions of NiteWatch,
 and should we?
+
+## Decision
+
+Kevin ratified the recommendation below and went further than it: not "neither
+yet," but **neither, removed from the roadmap**. No Linux or macOS work is
+planned, scheduled, or held open.
+
+The recommendation's own "do this now regardless" item — filing the Apple
+EndpointSecurity entitlement request early to start the queue — is **also
+dropped**, since it only makes sense as an option on a macOS build that is no
+longer contemplated. Do not file it.
+
+What this decision does *not* change: the codebase stays CGO-free and the
+non-Windows build stubs stay in place. They are not a hedge on a future port —
+they are what lets the whole thing be developed and tested on the WSL2 dev box,
+which is load-bearing for day-to-day work and is why `GOOS=linux` remains in the
+QA sweep.
+
+**Reopen triggers.** Revisit only if one of these becomes true:
+
+- Windows v1 ships, is signed and installable, and the false-positive rate is
+  measured and acceptable — i.e. the reason for waiting is gone; **and**
+- something changes the market case: a specific customer or channel asks for a
+  platform, or the Linux per-process DNS gap (Part 2) is closed by a library or
+  kernel facility that does not exist today.
+
+Absent both, this stays closed.
 
 ---
 
