@@ -5,25 +5,84 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NiteWatch — Who's Talking?</title>
 <style>
+  /* Two themes, and the dark one is a genuine redesign rather than the old
+     palette with the text turned up.
+
+     The complaint was "dark on dark", and it was right: panels sat at #161c2a
+     on a #0b0e14 page, a difference of about 6% lightness. Nothing looked like
+     a surface, everything looked like one flat sheet with words on it. Panels
+     are now clearly lifted off the page, borders are visible rather than
+     implied, and elevation is carried by shadow as well as colour. */
   :root {
-    /* Lifted for legibility. The old --muted (#8a93a6) at 11-12px was the main
-       complaint: technically ~6:1 contrast, but unreadable in practice because
-       the type was too small and too light at the same time. Everything here is
-       one step brighter and one step larger. */
-    --bg: #0b0e14; --panel: #161c2a; --panel-2: #1d2536; --line: #2c3549;
-    --fg: #f2f5fa; --muted: #aab6cc; --dim: #8593aa;
-    --accent: #6cb6ff; --accent-ink: #04121f; --new: #ffd36b;
-    --ok: #7ee2a8; --bad: #ff9b9b;
+    color-scheme: dark;
+    --bg: #0d1220;
+    --bg-2: #0a0e19;
+    --panel: #1b2337;
+    --panel-2: #253049;
+    --line: #38455f;
+    --line-soft: #2a344b;
+    --fg: #f5f8fd;
+    --muted: #bcc7dc;
+    --dim: #94a1ba;
+    --accent: #6cb6ff;
+    --accent-soft: rgba(108,182,255,.14);
+    --accent-ink: #04121f;
+    --new: #ffd36b;
+    --ok: #7ee2a8;
+    --bad: #ff9b9b;
+    --crit: #ff6b6b;
+    --high: #ffab52;
+    --sev-bg: #333d52;      --sev-fg: var(--muted);
+    --sev-crit-bg: #581919;  --sev-crit-fg: #ffb3b3;
+    --sev-high-bg: #55320f;  --sev-high-fg: #ffcb96;
+    --sev-drill-bg: #14344a; --sev-drill-fg: #8fd0ff;
+    --danger-bg: #3a1a1a;    --danger-line: #7a3030;  --danger-fg: #ffc4c4;
+    --fix-bg: #17293e;       --fix-line: #3f5f88;     --fix-fg: #d6e8ff;
+    --warn-bg: #2e2400;      --warn-line: #7a5600;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -8px rgba(0,0,0,.55);
+    --shadow-lg: 0 26px 70px rgba(0,0,0,.6);
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text",
             "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
     --r: 10px;
     --ease: cubic-bezier(.2,.7,.3,1);
   }
+
+  /* Light theme. Not an afterthought — this is the one to use in a lit room,
+     and "dark on dark" is most directly answered by being able to leave. */
+  html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #eef1f7;
+    --bg-2: #e4e9f2;
+    --panel: #ffffff;
+    --panel-2: #f2f5fa;
+    --line: #c8d2e2;
+    --line-soft: #dde4ef;
+    --fg: #0f1626;
+    --muted: #4d586e;
+    --dim: #6b7691;
+    --accent: #0f62c4;
+    --accent-soft: rgba(15,98,196,.10);
+    --accent-ink: #ffffff;
+    --new: #8a5a00;
+    --ok: #17794a;
+    --bad: #b3261e;
+    --crit: #b3261e;
+    --high: #9a5b00;
+    --sev-bg: #e2e8f2;       --sev-fg: #43506b;
+    --sev-crit-bg: #fbe3e1;  --sev-crit-fg: #96150f;
+    --sev-high-bg: #fdeed6;  --sev-high-fg: #854d00;
+    --sev-drill-bg: #dbeaff; --sev-drill-fg: #10508f;
+    --danger-bg: #fdeceb;    --danger-line: #e0a9a4;  --danger-fg: #96150f;
+    --fix-bg: #e8f1fd;       --fix-line: #a9c6e8;     --fix-fg: #0d4f9e;
+    --warn-bg: #fdf4de;      --warn-line: #d9b96a;
+    --shadow: 0 1px 2px rgba(16,26,48,.08), 0 6px 18px -8px rgba(16,26,48,.18);
+    --shadow-lg: 0 26px 70px rgba(16,26,48,.22);
+  }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
-  a:hover { color: #9ccdff; }
+  a:hover { color: color-mix(in srgb, var(--accent) 78%, var(--fg) 22%); }
   a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   /* External links are marked, because this page is otherwise entirely local
      and a click that leaves the machine should not be a surprise. */
@@ -33,7 +92,7 @@
     text-rendering: optimizeLegibility; }
   /* Ambient depth so the page doesn't read as a flat black rectangle. */
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background: radial-gradient(900px 480px at 50% -140px, rgba(108,182,255,.07), transparent 70%); }
+    background: radial-gradient(1000px 520px at 50% -160px, var(--accent-soft), transparent 72%); }
   header, .wrap { position: relative; z-index: 1; }
 
   /* flex-wrap is load-bearing, not cosmetic. Without it the header's buttons
@@ -44,7 +103,7 @@
      cause was four buttons in a row that would not break. */
   header { padding: 18px 24px; border-bottom: 1px solid var(--line);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    background: rgba(11,14,20,.86); backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
     position: sticky; top: 0; z-index: 20; }
   header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
   header .tag { color: var(--muted); font-size: 14px; }
@@ -59,24 +118,30 @@
 
   /* ── buttons: solid, obviously pressable, big enough to hit ───────── */
   .btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
+    box-shadow: var(--shadow);
     padding: 10px 16px; border-radius: var(--r); font: 600 14px/1.2 var(--sans);
     cursor: pointer; min-height: 40px; display: inline-flex; align-items: center;
     gap: 7px; transition: background .16s var(--ease), border-color .16s var(--ease),
     transform .12s var(--ease); }
-  .btn:hover { background: #26304a; border-color: #47587c; }
+  .btn:hover { background: var(--panel-2); border-color: var(--accent); }
   .btn:active { transform: translateY(1px); }
   .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .btn:disabled { opacity: .5; cursor: default; transform: none; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .btn.primary:hover { background: #8ac5ff; border-color: #8ac5ff; }
-  .btn.danger { background: #3a1a1a; border-color: #6f3030; color: #ffc4c4; }
-  .btn.danger:hover { background: #4d2222; border-color: #9a4141; }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 84%, white 16%);
+    border-color: color-mix(in srgb, var(--accent) 84%, white 16%); }
+  .btn.danger { background: var(--danger-bg); border-color: var(--danger-line);
+    color: var(--danger-fg); }
+  .btn.danger:hover { border-color: var(--bad);
+    background: color-mix(in srgb, var(--danger-bg) 82%, var(--bad) 18%); }
 
   .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    padding: 16px 20px; min-width: 156px; flex: 0 1 220px;
-    transition: border-color .18s var(--ease), transform .18s var(--ease); }
-  .card:hover { border-color: #3c4867; transform: translateY(-2px); }
+    padding: 16px 20px; min-width: 156px; flex: 0 1 220px; box-shadow: var(--shadow);
+    transition: border-color .18s var(--ease), transform .18s var(--ease),
+                box-shadow .18s var(--ease); }
+  .card:hover { border-color: var(--accent); transform: translateY(-3px);
+    box-shadow: var(--shadow), 0 0 0 3px var(--accent-soft); }
   .card .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
     font-variant-numeric: tabular-nums; }
   .card .l { color: var(--muted); font-size: 13px; font-weight: 600;
@@ -98,19 +163,22 @@
   .seg button.on { background: var(--accent); color: var(--accent-ink); }
 
   .flag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px;
-    font-weight: 700; letter-spacing: .04em; background: #4a1c1c; color: #ffb3b3;
-    border: 1px solid #7a2f2f; margin-left: 8px; vertical-align: 1px; }
+    font-weight: 700; letter-spacing: .04em; background: var(--sev-crit-bg);
+    color: var(--sev-crit-fg); border: 1px solid var(--danger-line);
+    margin-left: 8px; vertical-align: 1px; }
   td.owner { color: var(--fg); }
   td.cc { font-variant: small-caps; letter-spacing: .04em; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); }
   table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 940px; }
-  th, td { text-align: left; padding: 13px 15px; border-bottom: 1px solid var(--line);
+  th, td { text-align: left; padding: 13px 15px; border-bottom: 1px solid var(--line-soft);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
     font-size: 15px; }
   th { color: var(--muted); font-weight: 700; font-size: 12.5px; text-transform: uppercase;
     letter-spacing: .07em; cursor: pointer; user-select: none;
-    background: var(--panel-2); position: sticky; top: 0; }
+    background: var(--panel-2); position: sticky; top: 0;
+    border-bottom: 2px solid var(--line); }
   th:hover { color: var(--fg); }
   th .arrow { opacity: .5; font-size: 11px; margin-left: 5px; }
   th.sorted { color: var(--accent); }
@@ -123,10 +191,11 @@
     max-width: 110ch; }
 
   .banner { display: none; margin: 0 0 20px; padding: 15px 18px; border-radius: 12px;
-    border: 1px solid #7a5600; background: #2e2400; color: var(--new); font-size: 15px;
+    border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--new);
+    font-size: 15px;
     max-width: 110ch; }
   .banner.show { display: block; }
-  .banner b { color: #fff; }
+  .banner b { color: var(--fg); }
   .tools { margin-left: auto; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
   /* On a phone the controls get their own row rather than competing with the
      wordmark for space. */
@@ -138,7 +207,8 @@
   }
 
   .panel { display: none; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 14px; padding: 20px 22px; margin-bottom: 20px; }
+    border-radius: 14px; padding: 20px 22px; margin-bottom: 20px;
+    box-shadow: var(--shadow); }
   .panel.show { display: block; animation: drop .28s var(--ease); }
   .panel h2 { margin: 0 0 5px; font-size: 18px; font-weight: 700; }
   .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 100ch; }
@@ -156,20 +226,20 @@
   .saved { color: var(--ok); font-size: 14px; margin-left: 12px; font-weight: 600; }
 
   tr.clickable { cursor: pointer; }
-  tr.clickable:hover td { background: #202a3d; }
+  tr.clickable:hover td { background: var(--accent-soft); }
 
-  .modal { display: none; position: fixed; inset: 0; background: rgba(2,4,8,.72);
+  .modal { display: none; position: fixed; inset: 0; background: rgba(4,8,18,.66);
     align-items: center; justify-content: center; padding: 20px; z-index: 40;
     backdrop-filter: blur(3px); }
   .modal.show { display: flex; animation: fade .2s var(--ease); }
   .modal .box { background: var(--panel); border: 1px solid var(--line);
     border-radius: 16px; max-width: 760px; width: 100%; max-height: 86vh;
-    overflow: auto; padding: 24px 26px; box-shadow: 0 26px 70px rgba(0,0,0,.6);
+    overflow: auto; padding: 24px 26px; box-shadow: var(--shadow-lg);
     animation: rise .26s var(--ease); }
   .modal h2 { font-size: 19px; font-weight: 700; }
 
   .tale { font-size: 16.5px; line-height: 1.72; color: #f2f5fa; margin: 16px 0 0;
-    padding: 16px 18px; background: #101725; border-left: 4px solid var(--accent);
+    padding: 16px 18px; background: var(--bg-2); border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0; }
   .stepstoggle { margin-top: 14px; font-size: 14px; color: var(--accent);
     cursor: pointer; user-select: none; font-weight: 600; }
@@ -185,8 +255,8 @@
   .chain .d { color: var(--muted); font-size: 14px; font-family: var(--mono); }
 
   .alerts { margin-bottom: 22px; display: grid; gap: 12px; min-width: 0; }
-  .alert { border: 1px solid var(--line); border-left-width: 5px; border-radius: 14px;
-    background: var(--panel); padding: 17px 20px;
+  .alert { border: 1px solid var(--line); border-left-width: 6px; border-radius: 14px;
+    background: var(--panel); padding: 17px 20px; box-shadow: var(--shadow);
     animation: rise .34s var(--ease) both;
     /* min-width:0 is required, not tidy-up. A grid item defaults to
        min-width:auto, meaning it refuses to shrink below its content's
@@ -195,8 +265,8 @@
        own grid track and pushed the page wider than the screen. Zero lets the
        track constrain it, after which pre-wrap wraps normally. */
     min-width: 0; }
-  .alert.critical { border-left-color: #ff6b6b; }
-  .alert.high     { border-left-color: #ffab52; }
+  .alert.critical { border-left-color: var(--crit); }
+  .alert.high     { border-left-color: var(--high); }
   .alert.medium   { border-left-color: var(--new); }
   .alert.low      { border-left-color: #7c8aa3; }
   .alert h3 { margin: 0 0 9px; font-size: 17px; font-weight: 700; line-height: 1.35; }
@@ -204,41 +274,45 @@
   .alert .stale { color: var(--new); }
   .alert .sev { display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .08em;
     text-transform: uppercase; padding: 3px 9px; border-radius: 6px; margin-right: 10px;
-    background: #333d52; color: var(--muted); vertical-align: 2px; }
-  .alert.critical .sev { background: #581919; color: #ffb3b3; }
-  .alert.high .sev     { background: #55320f; color: #ffcb96; }
+    background: var(--sev-bg); color: var(--sev-fg); vertical-align: 2px; }
+  .alert.critical .sev { background: var(--sev-crit-bg); color: var(--sev-crit-fg); }
+  .alert.high .sev     { background: var(--sev-high-bg); color: var(--sev-high-fg); }
   /* Line length is capped independently of the page, because a comfortable
      measure is about 75-90 characters regardless of how wide the monitor is. */
-  .alert p { margin: 0 0 12px; color: #dde4f0; font-size: 15.5px; white-space: pre-wrap;
+  .alert p { margin: 0 0 12px; color: var(--fg); font-size: 15.5px; white-space: pre-wrap;
     line-height: 1.65; max-width: 95ch; overflow-wrap: anywhere; }
-  .alert ol { margin: 0; padding-left: 22px; color: #dde4f0; font-size: 15.5px;
+  .alert ol { margin: 0; padding-left: 22px; color: var(--fg); font-size: 15.5px;
     max-width: 95ch; overflow-wrap: anywhere; }
   .alert ol li { margin-bottom: 7px; line-height: 1.6; }
   .alert .act { margin-top: 14px; display: flex; gap: 9px; flex-wrap: wrap; }
-  .alert .fix { border-color: #3f5f88; background: #17293e; color: #d6e8ff; }
-  .alert .fix:hover { border-color: var(--accent); background: #1d3450; }
-  .alert .fix.hard { border-color: #7a3030; background: #331717; color: #ffbcbc; }
-  .alert .fix.hard:hover { border-color: #a34545; background: #431d1d; }
+  .alert .fix { border-color: var(--fix-line); background: var(--fix-bg); color: var(--fix-fg); }
+  .alert .fix:hover { border-color: var(--accent);
+    background: color-mix(in srgb, var(--fix-bg) 80%, var(--accent) 20%); }
+  .alert .fix.hard { border-color: var(--danger-line); background: var(--danger-bg);
+    color: var(--danger-fg); }
+  .alert .fix.hard:hover { border-color: var(--bad);
+    background: color-mix(in srgb, var(--danger-bg) 82%, var(--bad) 18%); }
   .alert.acked { opacity: .58; }
   /* A drill is visibly a drill, everywhere, always. */
-  .sev.drill { background: #14344a; color: #8fd0ff; border: 1px solid #2f6b93; }
-  .alert.drill { border-left-color: #4a8fc0 !important;
+  .sev.drill { background: var(--sev-drill-bg); color: var(--sev-drill-fg);
+    border: 1px solid var(--sev-drill-fg); }
+  .alert.drill { border-left-color: var(--accent) !important;
     background: repeating-linear-gradient(135deg, var(--panel), var(--panel) 14px,
-      #141b29 14px, #141b29 28px); }
+      var(--bg-2) 14px, var(--bg-2) 28px); }
 
   .prog { margin: 10px 0 0; font-size: 13.5px; font-family: var(--mono);
-    color: #dde4f0; word-break: break-all; background: #101725;
+    color: var(--fg); word-break: break-all; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; line-height: 1.55; }
   .prog .k { color: var(--muted); font-family: var(--sans); font-weight: 600; }
   .prog .odd { color: var(--new); font-family: var(--sans); }
 
-  .cause { margin: 12px 0 0; padding: 13px 15px; background: #101725;
+  .cause { margin: 12px 0 0; padding: 13px 15px; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
   .cause h4 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase;
     letter-spacing: .07em; color: var(--muted); font-weight: 700; }
   .cause .lin { color: var(--accent); font-family: var(--mono); font-size: 13.5px;
     overflow-wrap: anywhere; }
-  .cause ul { margin: 9px 0 0; padding-left: 20px; color: #dde4f0;
+  .cause ul { margin: 9px 0 0; padding-left: 20px; color: var(--fg);
     overflow-wrap: anywhere; }
   .cause li { margin-bottom: 4px; }
   .cause .cnt { color: var(--muted); }
@@ -251,7 +325,7 @@
   td.proc::after { content: " ›"; opacity: .6; }
 
   .pstat { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0 4px;
-    padding: 15px 18px; background: #101725; border: 1px solid var(--line); border-radius: 12px; }
+    padding: 15px 18px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; }
   .pstat div .n { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .pstat div .l { font-size: 12.5px; color: var(--muted); text-transform: uppercase;
     letter-spacing: .07em; font-weight: 600; }
@@ -270,21 +344,21 @@
   .lookup .ext { display: block; color: var(--muted); font-size: 13.5px; margin-top: 8px;
     max-width: 62ch; line-height: 1.6; }
   .lookup .btn.ext-btn { border-color: #4f6288; }
-  .lookup .res { margin-top: 14px; padding: 15px 17px; background: #101725;
+  .lookup .res { margin-top: 14px; padding: 15px 17px; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; }
   .lookup .res dl { display: grid; grid-template-columns: max-content 1fr;
     gap: 7px 18px; margin: 0; }
   .lookup .res dt { color: var(--muted); font-size: 12.5px; text-transform: uppercase;
     letter-spacing: .06em; padding-top: 2px; font-weight: 700; }
   .lookup .res dd { margin: 0; overflow-wrap: anywhere; }
-  .lookup .res .note { margin: 0 0 12px; color: #ffdf9e; line-height: 1.6; }
+  .lookup .res .note { margin: 0 0 12px; color: var(--new); line-height: 1.6; }
   .lookup .res .note.old { color: var(--muted); }
   .lookup .res .src { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
   .lookup .err { margin-top: 12px; color: var(--bad); font-size: 14px; }
   .plist .lk { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
     border-radius: 7px; font: 600 13px var(--sans); padding: 5px 11px; cursor: pointer;
     margin-left: 10px; min-height: 32px; }
-  .plist .lk:hover { color: var(--fg); border-color: var(--accent); background: #26304a; }
+  .plist .lk:hover { color: var(--fg); border-color: var(--accent); background: var(--panel-2); }
   .plist .lkres { flex-basis: 100%; }
 
   /* ── plain-English help ───────────────────────────────────────────── */
@@ -297,15 +371,65 @@
   body.plain .term:hover { border-bottom-color: var(--accent); color: var(--fg); }
   .gloss { display: grid; gap: 16px; }
   .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
-  .gloss dd { margin: 4px 0 0; color: #dde4f0; font-size: 15px; line-height: 1.65; }
+  .gloss dd { margin: 4px 0 0; color: var(--fg); font-size: 15px; line-height: 1.65; }
   .toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
     font-weight: 600; font-size: 14px; color: var(--muted); user-select: none; }
   .toggle:hover { color: var(--fg); }
   .toggle input { width: 20px; height: 20px; }
 
+  /* ── motion ───────────────────────────────────────────────────────
+     The previous animations only played when an element was created, and once
+     the table started reusing nodes that meant almost nothing ever moved. The
+     motion here is driven by DATA CHANGES instead, which makes it useful as
+     well as visible: a row that slides in is a connection that just happened,
+     and a cell that flashes is a number that just went up. Nothing animates
+     decoratively on a timer. */
   @keyframes fade { from { opacity: 0 } }
   @keyframes rise { from { opacity: 0; transform: translateY(10px) } }
   @keyframes drop { from { opacity: 0; transform: translateY(-8px) } }
+
+  /* A connection appearing for the first time. */
+  @keyframes rowIn {
+    0%   { opacity: 0; transform: translateY(-6px); }
+    100% { opacity: 1; transform: none; }
+  }
+  @keyframes rowTint {
+    0%, 35% { background: var(--accent-soft); }
+    100%    { background: transparent; }
+  }
+  tr.is-new { animation: rowIn .32s var(--ease); }
+  tr.is-new td { animation: rowTint 1.6s var(--ease); }
+
+  /* A value that just changed — bytes ticking up, activity counting on. */
+  @keyframes cellFlash {
+    0%   { color: var(--accent); transform: translateY(-2px); }
+    100% { color: inherit; transform: none; }
+  }
+  td.changed { animation: cellFlash .9s var(--ease); }
+
+  /* The headline counters, when they move. */
+  @keyframes statPop {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.14); color: var(--accent); }
+    100% { transform: scale(1); }
+  }
+  .card .n.bumped { animation: statPop .5s var(--ease); }
+
+  /* Live telemetry, so the page reads as alive rather than frozen. */
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-soft); }
+    50%      { opacity: .55; box-shadow: 0 0 0 6px transparent; }
+  }
+  .livedot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ok); margin-right: 9px; vertical-align: 1px;
+    animation: livePulse 2.4s ease-in-out infinite; }
+  .livedot.off { background: var(--dim); animation: none; }
+
+  /* Theme switch: colours cross-fade instead of snapping. */
+  body, .card, .panel, .alert, .btn, table, th, td, .tablewrap, .modal .box {
+    transition: background-color .28s var(--ease), color .28s var(--ease),
+                border-color .28s var(--ease);
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
@@ -314,8 +438,10 @@
 <body>
 <header>
   <h1>NiteWatch</h1>
-  <span class="tag">Who's talking? — outbound connection ledger</span>
+  <span class="tag"><span class="livedot off" id="livedot"></span><span id="livetext">Starting…</span></span>
   <div class="tools">
+    <button class="btn" id="theme-btn" title="Switch between light and dark"
+      aria-label="Switch between light and dark">🌙</button>
     <label class="toggle" title="Explain programs and technical words in plain English">
       <input type="checkbox" id="plain-toggle">
       Explain everything
@@ -367,7 +493,7 @@
           <a class="ext-link" href="https://www.virustotal.com/gui/my-apikey"
             target="_blank" rel="noopener noreferrer">your API key page</a>.
           Takes about a minute. (These open virustotal.com in your browser.)</div></div>
-      <div class="ctl"><input type="password" id="s-vtkey" placeholder="not set"
+      <div class="ctl"><input type="password" id="s-vtkey" placeholder="Not set"
         autocomplete="off" style="width:220px;padding:9px 11px;background:var(--bg);
         border:1px solid var(--line);border-radius:8px;color:var(--fg);font:500 14px var(--sans)"></div>
     </div>
@@ -484,6 +610,51 @@
 <script>
   let all = [];
   let VT_KEY_SET = false;
+  // Everything animated is gated on this, so the whole scheme honours the
+  // system setting rather than each rule remembering to.
+  const MOTION = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The first paint fills an empty page; animating every row then would be a
+  // firework display rather than a signal.
+  let firstPaint = true;
+
+  // A quiet heartbeat in the header. Software that is silent by design should
+  // still look alive — otherwise "is this thing running?" is a fair question
+  // with nothing on screen to answer it.
+  function setLive(running) {
+    const dot = document.getElementById("livedot");
+    const txt = document.getElementById("livetext");
+    if (!dot || !txt) return;
+    dot.classList.toggle("off", !running);
+    const label = running ? "Watching — outbound connection ledger"
+                          : "Not watching — see the notice below";
+    if (txt.textContent !== label) txt.textContent = label;
+  }
+
+  // ── theme ─────────────────────────────────────────────────────────
+  // Follows the operating system until the user expresses a preference, then
+  // remembers theirs. "Dark on dark is hard to see" is most directly answered
+  // by being able to leave.
+  const THEME_KEY = "nitewatch.theme";
+  function applyTheme(mode) {
+    document.documentElement.dataset.theme = mode;
+    const b = document.getElementById("theme-btn");
+    if (b) {
+      b.textContent = mode === "light" ? "☀️" : "🌙";
+      b.title = mode === "light" ? "Switch to dark" : "Switch to light";
+    }
+  }
+  function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* private mode */ }
+    const system = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    applyTheme(saved || system);
+  }
+  initTheme();
+  document.getElementById("theme-btn").addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
+  });
   const $ = (id) => document.getElementById(id);
 
   // Mutating endpoints require this header; it is what stops another site's
@@ -665,14 +836,22 @@
   function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
   function setAttr(el, k, v) { if ((el.getAttribute(k) || "") !== v) el.setAttribute(k, v); }
 
-  function paintRow(tr, c) {
+  function paintRow(tr, c, isNew) {
     const cells = rowCells(c);
     for (let i = 0; i < ROW_CELLS; i++) {
       const td = tr.children[i];
       const [text, cls, title] = cells[i];
+      // A value that just changed is worth pointing at. Only on existing rows —
+      // on a brand-new row every cell is "changed", which would be noise.
+      const changed = !isNew && td.textContent !== "" && td.textContent !== text;
       setText(td, text);
       if (td.className !== cls) td.className = cls;
       setAttr(td, "title", title);
+      if (changed && MOTION) {
+        td.classList.remove("changed");
+        void td.offsetWidth;            // restart the animation
+        td.classList.add("changed");
+      }
     }
     tr.children[1].dataset.img = c.image || "";
     const clickable = !!c.hasStory;
@@ -696,12 +875,17 @@
     for (const c of rows) {
       const key = String(c.id);
       let tr = existing.get(key);
+      const isNew = !tr;
       if (tr) {
         existing.delete(key);
       } else {
         tr = newRow();
       }
-      paintRow(tr, c);
+      paintRow(tr, c, isNew);
+      if (isNew && MOTION && !firstPaint) {
+        tr.classList.add("is-new");
+        setTimeout(() => tr.classList.remove("is-new"), 1700);
+      }
       if (tr === cursor) {
         cursor = cursor.nextElementSibling;   // already in the right place
       } else {
@@ -712,9 +896,21 @@
     for (const tr of existing.values()) tr.remove();
 
     $("empty").hidden = rows.length > 0;
-    setText($("c-total"), String(rows.length));
-    setText($("c-talkers"), String(new Set(rows.map(c => c.image)).size));
-    setText($("c-domains"), String(new Set(rows.map(c => c.domain || c.remoteIP)).size));
+    bumpStat($("c-total"), rows.length);
+    bumpStat($("c-talkers"), new Set(rows.map(c => c.image)).size);
+    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    firstPaint = false;
+  }
+
+  // The headline numbers pop when they move, and only when they move.
+  function bumpStat(el, value) {
+    const next = String(value);
+    if (el.textContent === next) return;
+    el.textContent = next;
+    if (!MOTION || firstPaint) return;
+    el.classList.remove("bumped");
+    void el.offsetWidth;
+    el.classList.add("bumped");
   }
 
   // Delegated once, rather than rebound to every row on every refresh. This is
@@ -765,7 +961,7 @@
       $("s-retention").value = v.retentionDays;
       // The key itself is never sent back, only whether one exists.
       VT_KEY_SET = !!v.virusTotalKeySet;
-      $("s-vtkey").placeholder = VT_KEY_SET ? "saved — type to replace" : "not set";
+      $("s-vtkey").placeholder = VT_KEY_SET ? "Saved — type to replace" : "Not set";
       $("s-vtkey").value = "";
     } catch (e) { /* panel stays as-is */ }
   }
@@ -792,7 +988,7 @@
       $("s-retention").value = v.retentionDays;
       VT_KEY_SET = !!v.virusTotalKeySet;
       $("s-vtkey").value = "";
-      $("s-vtkey").placeholder = VT_KEY_SET ? "saved — type to replace" : "not set";
+      $("s-vtkey").placeholder = VT_KEY_SET ? "Saved — type to replace" : "Not set";
       const tag = $("s-saved");
       tag.hidden = false;
       setTimeout(() => { tag.hidden = true; }, 1800);
@@ -1314,6 +1510,7 @@
     try {
       const st = await getJSON("/api/status");
       const b = $("banner");
+      setLive(st.running);
       if (st.running) { b.className = "banner"; return; }
       b.className = "banner show";
       if (st.source === "live-etw" && !st.elevated) {
