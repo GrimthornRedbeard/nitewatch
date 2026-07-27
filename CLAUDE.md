@@ -31,8 +31,12 @@ engine, detections, UX, advisory generation) are recorded there with alternative
 
 ## Hard Constraints
 
-- **Privacy:** no telemetry leaves the machine. Feeds are pull-only. The only optional
-  outbound query is an anonymous hash lookup the user can disable.
+- **Privacy:** no telemetry leaves the machine. Feeds are pull-only. Per-address queries
+  to third parties are allowed **only** when the user explicitly triggers one, on a
+  control that states what it will do first — currently the RDAP registration lookup
+  (`internal/rdap`), plus the planned anonymous hash lookup. Nothing automatic — no
+  ingest path, timer, or page load — may make one. Reverse DNS is the standing exception
+  and is disableable.
 - **Advisories are templated per rule** — deterministic, hand-written narrative +
   playbook. No LLM-generated security advice in the alert path.
 - **Response actions** use standard OS facilities (taskkill semantics, Windows

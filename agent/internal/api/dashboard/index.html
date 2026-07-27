@@ -153,6 +153,30 @@
   .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; }
   .why { color: var(--muted); font-size: 12px; margin-top: 16px;
     border-top: 1px solid var(--line); padding-top: 12px; }
+  /* Registration lookup. Deliberately set apart from everything else on the
+     page, because everything else is answered from this machine alone and this
+     one is not. The warning is part of the control, not a footnote. */
+  .lookup { margin-top: 14px; }
+  .lookup .ext { display: block; color: var(--muted); font-size: 11px; margin-top: 6px;
+    max-width: 62ch; line-height: 1.5; }
+  .lookup .btn.ext-btn { border-color: #4a5a7a; }
+  .lookup .res { margin-top: 12px; padding: 12px 14px; background: #0e1420;
+    border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .lookup .res dl { display: grid; grid-template-columns: max-content 1fr;
+    gap: 4px 14px; margin: 0; }
+  .lookup .res dt { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; padding-top: 2px; }
+  .lookup .res dd { margin: 0; overflow-wrap: anywhere; }
+  .lookup .res .note { margin: 0 0 10px; color: #ffd48a; }
+  .lookup .res .note.old { color: var(--muted); }
+  .lookup .res .src { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+  .lookup .err { margin-top: 10px; color: #ff9f9f; font-size: 12px; }
+  /* Per-destination lookup inside the process view. */
+  .plist .lk { background: none; border: 1px solid var(--line); color: var(--muted);
+    border-radius: 5px; font-size: 11px; padding: 1px 7px; cursor: pointer; margin-left: 8px; }
+  .plist .lk:hover { color: var(--fg); border-color: var(--accent); }
+  .plist li { flex-wrap: wrap; }
+  .plist .lkres { flex-basis: 100%; }
 </style>
 </head>
 <body>
@@ -253,6 +277,7 @@
     <h2 id="story-title" style="margin:0 0 4px;font-size:15px"></h2>
     <p class="hint" id="story-sub" style="color:var(--muted);font-size:12px;margin:0"></p>
     <p class="tale" id="story-tale" hidden></p>
+    <div class="lookup" id="story-lookup"></div>
     <div class="stepstoggle" id="story-toggle">▸ Show the individual events</div>
     <div id="story-steps-wrap" hidden><ol class="chain" id="story-chain"></ol></div>
     <p class="why">This chain is reconstructed from the causal event graph — each step is
@@ -515,10 +540,18 @@
       const conns = (p.connections || []).slice(0, 40);
       if (conns.length) {
         html += `<div class="psec"><h3>Everywhere it talks (${p.destinations})</h3><ul class="plist">` +
-          conns.map(c => `<li><span>${esc(c.domain || c.remoteIP)}</span>` +
-            `<span class="g">${esc(c.asOrg || "—")} ${esc(c.country || "")} · ` +
-            `↑${esc(bytes(c.bytesSent))} ↓${esc(bytes(c.bytesRecv))}</span></li>`).join("") +
-          `</ul></div>`;
+          conns.map(c => {
+            const t = lookupTargetFor(c);
+            return `<li><span>${esc(c.domain || c.remoteIP)}</span>` +
+              `<span class="g">${esc(c.asOrg || "—")} ${esc(c.country || "")} · ` +
+              `↑${esc(bytes(c.bytesSent))} ↓${esc(bytes(c.bytesRecv))}` +
+              (t ? `<button class="lk" data-lookup="${esc(t)}" title="Asks a public registry who owns ${esc(t)} — this leaves your computer">who owns this?</button>` : "") +
+              `</span><div class="lkres"></div></li>`;
+          }).join("") +
+          `</ul>` +
+          `<p class="hint" style="margin:8px 0 0;font-size:11px">“Who owns this?” asks the ` +
+          `public registry about that one address. It is the only thing on this page that ` +
+          `leaves your computer, and it only happens when you click it.</p></div>`;
       }
       if ((p.alerts || []).length) {
         html += `<div class="psec"><h3>Alerts about this program</h3><ul class="plist">` +
@@ -538,6 +571,13 @@
   function stat(n, label) {
     return `<div><div class="n">${esc(n)}</div><div class="l">${esc(label)}</div></div>`;
   }
+  // Delegated: the destination list is rebuilt on every open.
+  $("proc-body").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-lookup]");
+    if (!btn) return;
+    const out = btn.closest("li").querySelector(".lkres");
+    runLookup(btn.dataset.lookup, btn, out);
+  });
   $("proc-close").addEventListener("click", () => $("proc-modal").classList.remove("show"));
   $("proc-modal").addEventListener("click", (e) => {
     if (e.target === $("proc-modal")) $("proc-modal").classList.remove("show");
@@ -558,15 +598,109 @@
         `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
         (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
         (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("");
+      renderLookupControl($("story-lookup"), lookupTargetFor(c));
       $("story-modal").classList.add("show");
     } catch (e) {
       console.error("story failed", e);
+      $("story-lookup").innerHTML = "";
       $("story-title").textContent = "Could not load the story";
       $("story-tale").hidden = false;
       $("story-tale").textContent = String(e);
       $("story-modal").classList.add("show");
     }
   }
+  // --- registration lookup ---
+  // Everything else on this page is answered from this machine. This one asks a
+  // public registry, which means telling a stranger which address you are
+  // curious about. So it never fires on its own: the button says what it will do
+  // before you press it, and one press asks about one destination.
+  const lookupCache = new Map();
+
+  function lookupTargetFor(c) {
+    // Prefer the name: a domain's registration date is the useful signal, and a
+    // name lookup reveals no more than the address lookup already would.
+    return c.domain || c.remoteIP || "";
+  }
+
+  function renderLookupControl(container, target) {
+    container.innerHTML = "";
+    if (!target) return;
+    const btn = document.createElement("button");
+    btn.className = "btn ext-btn";
+    btn.textContent = "Look up who registered " + target;
+    const note = document.createElement("span");
+    note.className = "ext";
+    note.textContent = "This is the only button here that leaves your computer. " +
+      "It asks the public registry (rdap.org) who owns " + target + ", which tells " +
+      "them you are looking it up. Nothing about your machine, your programs or " +
+      "your other traffic is sent — only that one address.";
+    const out = document.createElement("div");
+    container.append(btn, note, out);
+    btn.addEventListener("click", () => runLookup(target, btn, out));
+  }
+
+  async function runLookup(target, btn, out) {
+    if (lookupCache.has(target)) { renderRegistration(out, lookupCache.get(target)); return; }
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = "Asking the registry…";
+    try {
+      const r = await post("/api/lookup?q=" + encodeURIComponent(target));
+      const body = await r.text();
+      if (!r.ok) throw new Error(body.trim() || r.statusText);
+      const reg = JSON.parse(body);
+      lookupCache.set(target, reg);
+      renderRegistration(out, reg);
+    } catch (e) {
+      out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  function renderRegistration(out, reg) {
+    const rows = [];
+    const add = (k, v) => { if (v) rows.push([k, v]); };
+    add(reg.kind === "domain" ? "Domain" : "Network", reg.name);
+    add("Address range", reg.range);
+    add("Registered to", reg.registrant);
+    add("Technical contact", reg.contact);
+    add("Registrar", reg.registrar);
+    add("Country", reg.country);
+    add("Registered on", fmtDate(reg.registered) + (reg.ageDays >= 0 ? ` (${ageText(reg.ageDays)})` : ""));
+    add("Expires", fmtDate(reg.expires));
+    add("Last changed", fmtDate(reg.changed));
+    add("Abuse contact", reg.abuse);
+    add("Name servers", (reg.nameservers || []).join(", "));
+    add("Status", (reg.status || []).join(", "));
+
+    const noteClass = reg.ageDays >= 0 && reg.ageDays <= 180 ? "note" : "note old";
+    out.innerHTML =
+      `<div class="res">` +
+      (reg.note ? `<p class="${noteClass}">${esc(reg.note)}</p>` : "") +
+      (rows.length
+        ? `<dl>` + rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") + `</dl>`
+        : `<p class="hint">The registry answered, but gave no details for this one.</p>`) +
+      `<p class="src">From the public registry${reg.source ? " (" + esc(reg.source) + ")" : ""}. ` +
+      `Registration records describe who holds an address, not whether it is safe.</p>` +
+      `</div>`;
+  }
+
+  function fmtDate(s) {
+    if (!s) return "";
+    const d = new Date(s);
+    return isNaN(d) ? s : d.toISOString().slice(0, 10);
+  }
+
+  function ageText(days) {
+    if (days < 1) return "today";
+    if (days === 1) return "1 day ago";
+    if (days < 60) return days + " days ago";
+    if (days < 730) return Math.round(days / 30) + " months ago";
+    return Math.round(days / 365) + " years ago";
+  }
+
   function stepLabel(kind) {
     return ({ ProcStart: "Program started", ProcExit: "Program exited",
       DNSQuery: "Looked up", NetConnect: "Connected to",

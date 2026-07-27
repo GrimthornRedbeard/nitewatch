@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 )
@@ -33,6 +35,7 @@ type Server struct {
 	exec          respond.Executor
 	quarantineDir string
 	token         *Token
+	rdap          *rdap.Client
 	addr          string
 
 	mu     sync.RWMutex
@@ -70,6 +73,16 @@ func (s *Server) WithToken(t *Token) *Server {
 func (s *Server) WithExecutor(e respond.Executor, quarantineDir string) *Server {
 	s.exec = e
 	s.quarantineDir = quarantineDir
+	return s
+}
+
+// WithLookups enables the on-demand registration lookup.
+//
+// Kept optional and off by default because it is the one feature that sends
+// anything about the user's machine off the box. Wiring it in is a deliberate
+// act; firing it is a second deliberate act, by the user, per address.
+func (s *Server) WithLookups(c *rdap.Client) *Server {
+	s.rdap = c
 	return s
 }
 
@@ -137,6 +150,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/actions", s.handleActions)
 	mux.HandleFunc("/api/actions/run", guardMutation(s.handleRunAction))
 	mux.HandleFunc("/api/actions/undo", guardMutation(s.handleUndoAction))
+	// POST, and guarded like a mutation, because it is one: it causes an
+	// outbound request that tells a registry what the user is looking at.
+	// Nothing should be able to trigger it by embedding a URL.
+	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -304,6 +321,40 @@ func (s *Server) handleStory(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write([]byte(story))
+}
+
+// handleLookup asks a public registry who a destination belongs to.
+//
+// This is the only route in the agent that reaches the internet on behalf of a
+// user action, so the rules around it are strict: POST only, so it cannot be
+// triggered by a link or an image; guarded like a mutation; and never called by
+// anything the dashboard does on its own. The button that reaches it says what
+// it will do before it does it.
+func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.rdap == nil {
+		http.Error(w, "registration lookups are not enabled on this agent", http.StatusNotFound)
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing q", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	reg, err := s.rdap.Lookup(ctx, q)
+	if err != nil {
+		// The message is written for a person to read, so pass it through rather
+		// than flattening it to a status code.
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, reg)
 }
 
 type alertDTO struct {

@@ -101,9 +101,23 @@ specifically.
 
 ## Data and privacy
 
-- **Nothing about the user's machine leaves it.** Feeds and the ownership
-  dataset are downloaded whole; no per-address query is made to a third party.
-  The only outbound traffic is fetching those public files.
+- **Nothing about the user's machine leaves it on its own.** Feeds and the
+  ownership dataset are downloaded whole; nothing the agent does automatically
+  makes a per-address query to a third party. All automatic outbound traffic is
+  fetching those public files.
+- **Registration lookup is a per-address query, and the user makes it.** The
+  "who owns this?" button asks a public registry (via `rdap.org`) about one
+  destination, which tells that registry the user is investigating it. It is the
+  only per-address third-party query in the product. It never fires on ingest,
+  on a timer, or as part of a page load — only on a click, and the button states
+  what it will do before it is pressed. Results are cached for an hour so
+  repeated clicks do not repeat the disclosure. The endpoint is POST-only and
+  guarded like a state change, so a link or an image cannot trigger it.
+  Verified by `TestNoRouteQueriesTheRegistryOnItsOwn`.
+- **Registration data says who holds an address, not whether it is safe.** A
+  recently registered domain is a useful signal, not a verdict; plenty of new
+  domains are ordinary and plenty of malicious traffic runs on old, reputable
+  infrastructure. The UI says so under every result.
 - **Reverse DNS is an exception worth naming:** naming an address uses the
   user's configured resolver, which means their DNS provider sees lookups for
   addresses their machine contacted. Disable with the "Look up names" setting.

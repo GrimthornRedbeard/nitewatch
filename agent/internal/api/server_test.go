@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/rdap"
 )
 
 // localReq builds a request that addresses the agent the way a real local
@@ -174,5 +176,82 @@ func TestForeignHostHeaderIsRejected(t *testing.T) {
 		if rr.Code == 403 {
 			t.Errorf("Host %q was rejected; the local dashboard must still work", host)
 		}
+	}
+}
+
+// The lookup endpoint is the only route that reaches the internet. It must not
+// be triggerable by anything except a deliberate press of the button.
+func TestLookupRequiresPostAndGuard(t *testing.T) {
+	var reached int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reached, 1)
+		_, _ = w.Write([]byte(`{"objectClassName":"ip network","name":"TEST-NET"}`))
+	}))
+	defer up.Close()
+	c := rdap.New()
+	c.BaseURL = up.URL
+	h := newTestServer(t).WithLookups(c).Handler()
+
+	call := func(method, url string, hdr map[string]string) int {
+		req := httptest.NewRequest(method, url, nil)
+		req.Host = "127.0.0.1:8973"
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// A GET — what an <img> or a link would produce — must not query anything.
+	if got := call(http.MethodGet, "/api/lookup?q=93.184.216.34", nil); got == http.StatusOK {
+		t.Errorf("GET /api/lookup returned 200; a link must not be able to trigger a query")
+	}
+	// A POST without the header another site cannot set.
+	if got := call(http.MethodPost, "/api/lookup?q=93.184.216.34", nil); got != http.StatusForbidden {
+		t.Errorf("unguarded POST = %d, want 403", got)
+	}
+	// A POST from another origin.
+	if got := call(http.MethodPost, "/api/lookup?q=93.184.216.34",
+		map[string]string{"X-NiteWatch": "1", "Origin": "https://evil.test"}); got != http.StatusForbidden {
+		t.Errorf("cross-origin POST = %d, want 403", got)
+	}
+	if n := atomic.LoadInt32(&reached); n != 0 {
+		t.Fatalf("the registry was contacted %d times by requests that should have been refused", n)
+	}
+
+	// The real thing: a guarded POST, as the button sends it.
+	if got := call(http.MethodPost, "/api/lookup?q=93.184.216.34",
+		map[string]string{"X-NiteWatch": "1"}); got != http.StatusOK {
+		t.Errorf("guarded POST = %d, want 200", got)
+	}
+	if n := atomic.LoadInt32(&reached); n != 1 {
+		t.Errorf("registry contacted %d times, want exactly 1", n)
+	}
+}
+
+// Nothing may query a registry on its own — not on ingest, not on a timer, and
+// not while the dashboard is doing its ordinary work.
+func TestNoRouteQueriesTheRegistryOnItsOwn(t *testing.T) {
+	var reached int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reached, 1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+	c := rdap.New()
+	c.BaseURL = up.URL
+	h := newTestServer(t).WithLookups(c).Handler()
+
+	for _, path := range []string{
+		"/api/connections", "/api/talkers", "/api/status", "/api/alerts",
+		"/api/settings", "/api/actions", "/api/process?image=x", "/api/story?id=1", "/",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "127.0.0.1:8973"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if n := atomic.LoadInt32(&reached); n != 0 {
+		t.Fatalf("ordinary dashboard traffic caused %d outbound registry queries; it must cause none", n)
 	}
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/notify"
 	"github.com/threattape/nitewatch/agent/internal/platform"
+	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/rules"
@@ -147,7 +148,10 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	if serve {
 		quarantine := filepath.Join(baseDir(), "quarantine")
 		srv = api.New(led).WithSettings(cfg).
-			WithExecutor(respond.NewWindowsExecutor(quarantine), quarantine)
+			WithExecutor(respond.NewWindowsExecutor(quarantine), quarantine).
+			// Registration lookups. Available, never automatic: nothing reaches
+			// the registry unless the user presses the button for one address.
+			WithLookups(rdap.New())
 		if tok, err := api.NewToken(baseDir()); err == nil {
 			srv = srv.WithToken(tok)
 			log.Printf("api: token required; stored at %s", tok.Path())
