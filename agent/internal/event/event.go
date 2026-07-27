@@ -48,7 +48,12 @@ type NormalizedEvent struct {
 	RemoteIP   string `json:"remoteIP,omitempty"`
 	RemotePort uint16 `json:"remotePort,omitempty"`
 	Proto      string `json:"proto,omitempty"` // "TCP"/"UDP"
-	Inbound    bool   `json:"inbound,omitempty"`
+	// BytesSent/BytesRecv are per-event transfer sizes. Volume is the one thing
+	// about an encrypted conversation that is always visible, and it is what
+	// separates a heartbeat from an upload of your documents.
+	BytesSent uint64 `json:"bytesSent,omitempty"`
+	BytesRecv uint64 `json:"bytesRecv,omitempty"`
+	Inbound   bool   `json:"inbound,omitempty"`
 
 	// DNS (DNSQuery):
 	QueryName string   `json:"queryName,omitempty"`

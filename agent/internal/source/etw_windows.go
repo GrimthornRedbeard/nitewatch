@@ -249,6 +249,18 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 		if ne.RemoteIP == "" && ne.SrcIP == "" {
 			return ne, false // nothing useful without an address
 		}
+		// Transfer volume, by direction. The opcode is the only reliable
+		// indicator: "Protocol copied data on behalf of user" duplicates the
+		// receive event for the same bytes, so counting it would inflate every
+		// total roughly twofold.
+		if n := u64(e.EventData, "size"); n > 0 {
+			switch e.System.Opcode.Name {
+			case "Data sent.", "Data sent over UDP protocol.":
+				ne.BytesSent = n
+			case "Data received.", "Data received over UDP protocol.":
+				ne.BytesRecv = n
+			}
+		}
 	case "Microsoft-Windows-DNS-Client", "Microsoft-Windows-DNS-Client-Operational":
 		ne.Kind = event.KindDNSQuery
 		ne.PID = u32(e.EventData, ne.PID, "PID", "ProcessId", "ProcessID")
@@ -443,6 +455,18 @@ func u32(m map[string]interface{}, def uint32, keys ...string) uint32 {
 		}
 	}
 	return def
+}
+
+// u64 reads a numeric payload field.
+func u64(m map[string]interface{}, keys ...string) uint64 {
+	for _, k := range keys {
+		if s := str(m, k); s != "" {
+			if n, err := strconv.ParseUint(s, 0, 64); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 func u16(m map[string]interface{}, def uint16, keys ...string) uint16 {

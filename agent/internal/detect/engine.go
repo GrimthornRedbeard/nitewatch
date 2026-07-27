@@ -44,19 +44,27 @@ type Detector func(s Subject, e *Engine) map[string]any
 
 // Engine evaluates the loaded rule set against subjects.
 type Engine struct {
-	set   *rules.Set
-	intel *intel.Store
-	dets  map[string]Detector
+	set    *rules.Set
+	intel  *intel.Store
+	dets   map[string]Detector
+	exfil  *ExfilTracker
+	beacon *BeaconTracker
 }
+
+// Exfil exposes the tracker so the collector can record sensitive reads
+// against the same instance the detector consults.
+func (e *Engine) Exfil() *ExfilTracker { return e.exfil }
 
 // New builds an engine. A nil intel store simply disables feed-based detectors.
 func New(set *rules.Set, feeds *intel.Store) *Engine {
-	e := &Engine{set: set, intel: feeds}
+	e := &Engine{set: set, intel: feeds, exfil: NewExfilTracker(), beacon: NewBeaconTracker()}
 	e.dets = map[string]Detector{
 		"connection-intel-hit":  detectIntelHit,
 		"raw-ip-no-dns":         detectRawIPNoDNS,
 		"unsigned-outbound":     detectUnsignedOutbound,
 		"foreign-first-contact": detectForeignFirstContact,
+		"exfil-after-read":      detectExfilAfterRead,
+		"beaconing":             detectBeaconing,
 	}
 	return e
 }
@@ -100,6 +108,8 @@ func baseFields(s Subject) map[string]any {
 		"RemotePort":  s.Conn.RemotePort,
 		"Domain":      s.Domain,
 		"Owner":       s.Recon.Org,
+		"BytesSent":   humanBytes(s.Conn.BytesSent),
+		"BytesRecv":   humanBytes(s.Conn.BytesRecv),
 		"Country":     s.Recon.Country,
 		"ASN":         s.Recon.ASN,
 	}

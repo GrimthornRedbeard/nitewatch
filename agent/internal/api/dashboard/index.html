@@ -200,6 +200,8 @@
       <th data-k="country" title="Country the address block is registered to">Country</th>
       <th data-k="proto">Proto</th>
       <th data-k="inbound" title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
+      <th data-k="bytesSent" title="How much this PC SENT to that destination. Volume is visible even when the contents are encrypted.">Sent</th>
+      <th data-k="bytesRecv" title="How much this PC received">Received</th>
       <th data-k="events" title="Network events collapsed into this connection">Activity</th>
     </tr></thead>
     <tbody id="rows"></tbody>
@@ -237,6 +239,17 @@
     if (!p) return "(unknown)";
     const parts = p.split(/[\\/]/);
     return parts[parts.length - 1] || p;
+  }
+  // Volume is the one thing about an encrypted conversation that is always
+  // visible, and an upload far larger than the download is the shape of data
+  // leaving rather than arriving.
+  function bytes(n) {
+    n = n || 0;
+    if (!n) return "—";
+    if (n >= 1073741824) return (n / 1073741824).toFixed(1) + " GB";
+    if (n >= 1048576) return (n / 1048576).toFixed(1) + " MB";
+    if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+    return n + " B";
   }
   function hostPort(ip, port) {
     if (!ip) return "";
@@ -355,6 +368,8 @@
         `<td class="cc">${esc(c.country || "—")}</td>` +
         `<td>${esc(c.proto)}</td>` +
         `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
+        `<td class="num">${esc(bytes(c.bytesSent))}</td>` +
+        `<td class="num">${esc(bytes(c.bytesRecv))}</td>` +
         `<td class="num">${esc(c.events || 1)}</td>`;
       tb.appendChild(tr);
     }

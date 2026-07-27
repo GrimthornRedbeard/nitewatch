@@ -92,3 +92,50 @@ rules:
       - "Does {{.ProcessName}} have a reason to talk to a server in {{.Country}}?"
       - "If it is a browser, a game, or a messaging app, this is probably normal."
       - "If it is something you do not recognise, run a full Microsoft Defender scan."
+
+  - id: c2-exfil-after-secret-read
+    area: c2
+    severity: critical
+    detector: exfil-after-read
+    title: "{{.ProcessName}} sent {{.UploadSize}} straight after reading {{.WhatWasTaken}}"
+    narrative: |
+      {{.ProcessName}} read {{.WhatWasTaken}}, and moments later uploaded
+      {{.UploadSize}} to {{.Destination}}{{if .Owner}}, a network operated by
+      {{.Owner}}{{end}}.
+
+      The upload itself is encrypted and cannot be read. It does not need to be:
+      the program took your secrets and then sent something of about that size
+      to someone else. Assume the contents of those files are now known to
+      whoever runs that server.
+
+      The program is:
+        {{.ImagePath}}
+    playbook:
+      - "Disconnect this device from the internet now."
+      - "From a DIFFERENT device, change your important passwords — email and banking first."
+      - "Turn on two-factor authentication everywhere you can."
+      - "Stop the program using the button below, then run a full Microsoft Defender scan."
+      - "If you use a password manager, change its master password too."
+
+  - id: c2-beaconing
+    area: c2
+    severity: high
+    detector: beaconing
+    title: "{{.ProcessName}} is checking in with {{.Destination}} on a timer"
+    narrative: |
+      {{.ProcessName}} has contacted {{.Destination}}{{if .Owner}} ({{.Owner}}){{end}}
+      {{.BeaconSamples}} times, almost exactly every {{.BeaconInterval}}.
+
+      That regularity is the point. People and normal programs produce uneven
+      traffic; a fixed rhythm means something is asking for instructions on a
+      schedule, which is how remote-control malware stays in touch with whoever
+      installed it. Some legitimate software polls on a timer too, so the
+      question is whether you recognise this program.
+
+      The program is:
+        {{.ImagePath}}
+    playbook:
+      - "Do you recognise {{.ProcessName}}? If not, treat this seriously."
+      - "Block the connection using the button below — it stops the check-ins without removing anything."
+      - "Run a full Microsoft Defender scan."
+      - "If this is a work computer, tell your IT team."

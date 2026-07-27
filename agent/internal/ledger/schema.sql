@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS connections (
 	asn         INTEGER NOT NULL DEFAULT 0,
 	as_org      TEXT,
 	country     TEXT,
-	story       TEXT
+	story       TEXT,
+	bytes_sent  INTEGER NOT NULL DEFAULT 0,
+	bytes_recv  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_conn_ts ON connections(ts);
 CREATE INDEX IF NOT EXISTS idx_conn_image_domain ON connections(image, domain);

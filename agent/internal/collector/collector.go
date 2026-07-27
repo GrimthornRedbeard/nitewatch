@@ -234,6 +234,9 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		}
 	case event.KindProcExit:
 		c.files.Forget(e.PID)
+		if c.opts.Detect != nil {
+			c.opts.Detect.Exfil().Forget(e.PID)
+		}
 		// Windows recycles PIDs aggressively. A cached image for a dead PID
 		// names the wrong program on future connection rows — and the process
 		// name is the field users act on.
@@ -311,6 +314,8 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		ASOrg:      info.Org,
 		Country:    info.Country,
 		Story:      story,
+		BytesSent:  e.BytesSent,
+		BytesRecv:  e.BytesRecv,
 	}
 	_ = c.ledger.RecordConnectionDedup(conn, c.dedupWindow())
 
@@ -337,6 +342,7 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 		e.Signed, e.Signer = c.signerOf(imageFor(e, c))
 	}
 
+	conn.LastSeen = e.Time
 	subject := detect.Subject{
 		Event:        e,
 		Conn:         conn,
@@ -496,6 +502,11 @@ func (c *Collector) onFileEvent(e event.NormalizedEvent) {
 
 	switch cat {
 	case filewatch.Credential:
+		// Remember what was taken, so an upload by this process in the next
+		// couple of minutes can say what is probably inside it.
+		if what, _ := filewatch.CredentialInfo(e.Path); what != "" && c.opts.Detect != nil {
+			c.opts.Detect.Exfil().NoteSensitiveRead(e.PID, what, e.Path, e.Time)
+		}
 		// Reading a secret store is judged on the spot: one read is the whole
 		// event, and waiting for a pattern would mean waiting until after the
 		// passwords were already taken.

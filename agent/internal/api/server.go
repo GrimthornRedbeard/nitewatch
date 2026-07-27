@@ -107,6 +107,8 @@ type connectionDTO struct {
 	Country    string    `json:"country"`
 	ID         int64     `json:"id"`
 	HasStory   bool      `json:"hasStory"`
+	BytesSent  uint64    `json:"bytesSent"`
+	BytesRecv  uint64    `json:"bytesRecv"`
 }
 
 type talkerDTO struct {
@@ -210,6 +212,7 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 			IPVersion: ipVersion(c.RemoteIP), Inbound: c.Inbound,
 			ASN: c.ASN, ASOrg: c.ASOrg, Country: c.Country,
 			ID: c.ID, HasStory: c.Story != "",
+			BytesSent: c.BytesSent, BytesRecv: c.BytesRecv,
 		})
 	}
 	writeJSON(w, out)

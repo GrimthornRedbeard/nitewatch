@@ -52,6 +52,12 @@ type Connection struct {
 	ASOrg   string
 	Country string
 
+	// BytesSent/BytesRecv accumulate across the flow. On an encrypted
+	// connection this is the only measure of WHAT moved, and a program that
+	// normally downloads suddenly uploading is the shape of exfiltration.
+	BytesSent uint64
+	BytesRecv uint64
+
 	// Story is the causal chain that produced this connection, serialized from
 	// the poset at record time. Kept with the row because the live causal
 	// window is bounded — without this the explanation is lost when it rolls.
@@ -155,10 +161,13 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 				     asn     = CASE WHEN asn = 0 THEN ? ELSE asn END,
 				     as_org  = COALESCE(NULLIF(as_org, ''), ?),
 				     country = COALESCE(NULLIF(country, ''), ?),
-				     story   = COALESCE(NULLIF(story, ''), ?)
+				     story   = COALESCE(NULLIF(story, ''), ?),
+				     bytes_sent = bytes_sent + ?,
+				     bytes_recv = bytes_recv + ?
 				 WHERE id = ?`,
 				ts, c.PID, nullable(c.Domain), c.Image, c.Inbound,
-				c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story), id,
+				c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story),
+				c.BytesSent, c.BytesRecv, id,
 			)
 			return err
 		}
@@ -173,6 +182,7 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
 		c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story),
+		c.BytesSent, c.BytesRecv,
 	)
 	return err
 }
@@ -182,7 +192,8 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 	rows, err := d.sql.Query(
 		`SELECT ts, COALESCE(NULLIF(last_seen, ''), ts), events, pid, image,
 		        remote_ip, remote_port, proto, COALESCE(domain, ''), verdict, inbound,
-		        asn, COALESCE(as_org, ''), COALESCE(country, ''), COALESCE(story, ''), id
+		        asn, COALESCE(as_org, ''), COALESCE(country, ''), COALESCE(story, ''), id,
+		        bytes_sent, bytes_recv
 		 FROM connections ORDER BY last_seen DESC, id DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -196,7 +207,8 @@ func (d *DB) RecentConnections(limit int) ([]Connection, error) {
 		var ts, last string
 		if err := rows.Scan(&ts, &last, &c.Events, &c.PID, &c.Image, &c.RemoteIP,
 			&c.RemotePort, &c.Proto, &c.Domain, &c.Verdict, &c.Inbound,
-			&c.ASN, &c.ASOrg, &c.Country, &c.Story, &c.ID); err != nil {
+			&c.ASN, &c.ASOrg, &c.Country, &c.Story, &c.ID,
+			&c.BytesSent, &c.BytesRecv); err != nil {
 			return nil, err
 		}
 		c.Time = parseTS(ts)
