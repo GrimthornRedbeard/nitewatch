@@ -281,6 +281,16 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 	// explanation must be captured while the ancestors still exist.
 	story := ""
 	if st := c.window.Current().StoryFor(id); len(st.Steps) > 0 {
+		// Write the story as prose while the graph still holds the events. A
+		// list of steps asks the reader to assemble the meaning; a sentence
+		// hands it to them.
+		pctx := c.window.Current().ContextFor(e.PID)
+		st.Context = &pctx
+		st.Narrative = graph.Narrate(st, pctx, graph.Peer{
+			IP: peerIP, Port: peerPort, Domain: domain,
+			Owner: info.Org, Country: info.Country,
+			BytesSent: e.BytesSent, BytesRecv: e.BytesRecv,
+		})
 		if b, err := json.Marshal(st); err == nil {
 			story = string(b)
 		}

@@ -18,6 +18,12 @@ import (
 type Story struct {
 	Steps   []Step `json:"steps"`
 	Mermaid string `json:"mermaid"`
+	// Narrative is the chain written as prose. Stored rather than regenerated
+	// so the account of an event never changes after the fact.
+	Narrative string `json:"narrative,omitempty"`
+	// Context is what else the program was doing, kept with the story so the
+	// full picture survives the causal window rolling over.
+	Context *Context `json:"context,omitempty"`
 }
 
 // Step is one event in the causal chain, in happens-before order.

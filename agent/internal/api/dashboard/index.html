@@ -83,6 +83,12 @@
   .modal .box { background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; max-width: 720px; width: 100%; max-height: 85vh;
     overflow: auto; padding: 20px 22px; }
+  .tale { font-size: 14px; line-height: 1.6; color: #e8edf6; margin: 14px 0 0;
+    padding: 14px 16px; background: #0e1420; border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0; }
+  .stepstoggle { margin-top: 12px; font-size: 12px; color: var(--muted);
+    cursor: pointer; user-select: none; }
+  .stepstoggle:hover { color: var(--fg); }
   .chain { list-style: none; margin: 14px 0 0; padding: 0; }
   .chain li { position: relative; padding: 0 0 18px 26px; border-left: 2px solid var(--line); }
   .chain li:last-child { border-left-color: transparent; padding-bottom: 0; }
@@ -243,7 +249,9 @@
   <div class="box">
     <h2 id="story-title" style="margin:0 0 4px;font-size:15px"></h2>
     <p class="hint" id="story-sub" style="color:var(--muted);font-size:12px;margin:0"></p>
-    <ol class="chain" id="story-chain"></ol>
+    <p class="tale" id="story-tale" hidden></p>
+    <div class="stepstoggle" id="story-toggle">▸ Show the individual events</div>
+    <div id="story-steps-wrap" hidden><ol class="chain" id="story-chain"></ol></div>
     <p class="why">This chain is reconstructed from the causal event graph — each step is
       an event that <em>caused</em> the next, ordered by logical (Lamport) clock rather than
       wall-clock time.</p>
@@ -535,6 +543,9 @@
         (c.domain || c.remoteIP);
       $("story-sub").textContent = (c.asOrg ? c.asOrg + " · " : "") +
         (c.country || "") + " · " + hostPort(c.remoteIP, c.remotePort);
+      $("story-tale").textContent = st.narrative || "";
+      $("story-tale").hidden = !st.narrative;
+      $("story-steps-wrap").hidden = !st.narrative ? false : true;
       $("story-chain").innerHTML = (st.steps || []).map(s =>
         `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
         (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
@@ -547,6 +558,11 @@
       DNSQuery: "Looked up", NetConnect: "Connected to",
       FileWrite: "Wrote file" })[kind] || kind;
   }
+  $("story-toggle").addEventListener("click", () => {
+    const w = $("story-steps-wrap");
+    w.hidden = !w.hidden;
+    $("story-toggle").textContent = (w.hidden ? "▸ Show" : "▾ Hide") + " the individual events";
+  });
   $("story-close").addEventListener("click", () => $("story-modal").classList.remove("show"));
   $("story-modal").addEventListener("click", (e) => {
     if (e.target === $("story-modal")) $("story-modal").classList.remove("show");
