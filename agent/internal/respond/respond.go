@@ -105,6 +105,69 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 			})
 		}
 
+	// Ransomware and credential theft are the two areas where the playbook text
+	// says "stop it using the button below" — so the button has to exist. It
+	// did not, and a critical ransomware alert shipped with no actions at all,
+	// which is the worst possible moment to point someone at a control that is
+	// not there.
+	//
+	// Stopping the process is the whole response here. There is no address to
+	// block (the damage is local) and no autostart entry to remove (that is the
+	// persistence pack's job).
+	case "ransomware":
+		if pid != "" && pid != "0" && proc != "" {
+			out = append(out, Action{
+				Kind:  KillProcess,
+				Label: fmt.Sprintf("Stop %s now", proc),
+				// Deliberately blunter than the c2 wording. When files are being
+				// encrypted, the cost of hesitating exceeds the cost of closing
+				// something that turns out to have been a backup tool.
+				Detail:     fmt.Sprintf("Closes %s immediately and anything it started. If this turns out to be a backup or sync tool, you can start it again — stopping it does not lose anything already written.", proc),
+				Reversible: false,
+				Params:     map[string]string{"pid": pid, "image": image, "name": proc},
+			})
+		}
+		if image != "" && severity == "critical" {
+			out = append(out, Action{
+				Kind:       QuarantineFile,
+				Label:      "Quarantine this program",
+				Detail:     fmt.Sprintf("Moves %s somewhere it cannot run and removes permission to execute it, so it cannot start again after a reboot. This can be undone.", image),
+				Reversible: true,
+				Params:     map[string]string{"path": image},
+			})
+		}
+
+	case "credentials":
+		if pid != "" && pid != "0" && proc != "" {
+			out = append(out, Action{
+				Kind:       KillProcess,
+				Label:      fmt.Sprintf("Stop %s now", proc),
+				Detail:     fmt.Sprintf("Closes %s. This stops it reading anything further — it does not undo what has already been read, so change your passwords from another device regardless.", proc),
+				Reversible: false,
+				Params:     map[string]string{"pid": pid, "image": image, "name": proc},
+			})
+		}
+		// An information stealer reads and then uploads. If a destination came
+		// with the evidence, cutting it off is the cheapest useful action.
+		if ip != "" {
+			out = append(out, Action{
+				Kind:       BlockAddress,
+				Label:      "Block this connection",
+				Detail:     fmt.Sprintf("Adds a Windows Firewall rule stopping all programs on this PC from contacting %s. You can remove it later.", ip),
+				Reversible: true,
+				Params:     map[string]string{"ip": ip, "dest": dest},
+			})
+		}
+		if image != "" && severity == "critical" {
+			out = append(out, Action{
+				Kind:       QuarantineFile,
+				Label:      "Quarantine this program",
+				Detail:     fmt.Sprintf("Moves %s somewhere it cannot run and removes permission to execute it. This can be undone.", image),
+				Reversible: true,
+				Params:     map[string]string{"path": image},
+			})
+		}
+
 	case "persistence":
 		loc, name := str(ev, "Location"), str(ev, "EntryName")
 		if loc != "" && name != "" {
