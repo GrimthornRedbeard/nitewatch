@@ -38,10 +38,11 @@
   td.owner { color: var(--fg); }
   td.cc { font-variant: small-caps; letter-spacing: .5px; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
   table { width: 100%; border-collapse: collapse; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    min-width: 900px; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; }
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase;
     letter-spacing: .5px; cursor: pointer; user-select: none; white-space: nowrap; }
   th:hover { color: var(--fg); }
@@ -212,6 +213,7 @@
       <option value="all">All countries</option>
     </select>
   </div>
+  <div class="tablewrap">
   <table>
     <thead><tr id="thead">
       <th data-k="lastSeen">Last seen</th>
@@ -228,6 +230,7 @@
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
+  </div>
   <div id="empty" class="empty" hidden>No connections recorded yet.</div>
   <div class="foot"><b>Click a program name</b> for everything it is doing —
     what started it, everywhere it talks, how much it sends.
@@ -525,7 +528,12 @@
       }
       $("proc-body").innerHTML = html || `<p class="hint">No activity recorded yet.</p>`;
       $("proc-modal").classList.add("show");
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.error("process view failed", e);
+      $("proc-title").textContent = "Could not load this program";
+      $("proc-body").innerHTML = `<p class="hint">${esc(String(e))}</p>`;
+      $("proc-modal").classList.add("show");
+    }
   }
   function stat(n, label) {
     return `<div><div class="n">${esc(n)}</div><div class="l">${esc(label)}</div></div>`;
@@ -538,7 +546,7 @@
   async function showStory(c) {
     if (!c.hasStory) return;
     try {
-      const st = await (await fetch("/api/story?id=" + encodeURIComponent(c.id))).json();
+      const st = await (await get("/api/story?id=" + encodeURIComponent(c.id))).json();
       $("story-title").textContent = "Why " + shortImage(c.image) + " contacted " +
         (c.domain || c.remoteIP);
       $("story-sub").textContent = (c.asOrg ? c.asOrg + " · " : "") +
@@ -551,7 +559,13 @@
         (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
         (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("");
       $("story-modal").classList.add("show");
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.error("story failed", e);
+      $("story-title").textContent = "Could not load the story";
+      $("story-tale").hidden = false;
+      $("story-tale").textContent = String(e);
+      $("story-modal").classList.add("show");
+    }
   }
   function stepLabel(kind) {
     return ({ ProcStart: "Program started", ProcExit: "Program exited",
