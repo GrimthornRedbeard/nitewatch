@@ -52,13 +52,25 @@ Build (pure-Go, single static exe, no CGO):
 cd agent && CGO_ENABLED=0 go build -o nitewatch ./cmd/nitewatch
 ```
 
+Cross-compile for Windows:
+
+```bash
+cd agent && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o ../dist/nitewatch.exe ./cmd/nitewatch
+```
+
+`dist/` is git-ignored build output. To hand someone a working copy, ship the
+exe together with `agent/scripts/run-nitewatch.bat` — that launcher is the
+source of truth, and it must sit in the same directory as the exe because it
+self-elevates and then runs `nitewatch.exe` from its own location.
+
 **Windows (live)** — must run **elevated**; ETW requires Administrator:
 
 ```
 nitewatch.exe --serve
 ```
 
-Then open <http://127.0.0.1:8973>.
+Or double-click `run-nitewatch.bat`, which requests elevation for you. Then
+open <http://127.0.0.1:8973>.
 
 **Dev/demo (any OS)** — replay a recorded trace, no elevation needed:
 

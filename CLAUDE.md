@@ -24,7 +24,12 @@ engine, detections, UX, advisory generation) are recorded there with alternative
     constraint checker, Mermaid/DOT export
   - Ledger: SQLite via `modernc.org/sqlite` (pure Go — keep the build CGO-free)
   - Telemetry: userland ETW consumers. **No kernel driver, ever, in this product line.**
-- **Dashboard:** SvelteKit, served by the agent on localhost only
+- **Dashboard:** a single embedded HTML file (`internal/api/dashboard/index.html`),
+  served by the agent on localhost only and compiled into the binary with `go:embed`.
+  The design doc called for SvelteKit; that was dropped during P1 and has stayed
+  dropped, because a build-step-free single file keeps the "one static exe with no
+  runtime dependencies" property that the whole distribution story rests on. Revisit
+  only if the UI outgrows hand-written HTML.
 - **Rules:** signed JSON/YAML rule packs (data, not code), hot-loaded
 - **Intel feeds:** abuse.ch (ThreatFox/Feodo/URLhaus), Tor exits — pulled down,
   matched locally
