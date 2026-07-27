@@ -66,9 +66,11 @@ specifically.
   development affordance, not an update channel. Signing must land before packs
   ship separately.
 - **Rule packs are not hot-loaded.** They are read once at startup.
-- **Beaconing detection** (regular-interval C2 callbacks) is described in the
-  P2 plan but not built. The ledger records what it needs; the detector does
-  not exist.
+- **Beaconing detection is built but unproven in the field.** `c2-beaconing`
+  fires on coefficient-of-variation regularity after 15 samples, a threshold
+  set by measurement against synthetic irregular traffic (8 samples gave 8 false
+  alarms per 300 sequences; 15 gave none). It has never run against a real
+  machine for a week, and deliberately jittered C2 will evade it.
 
 ### Structural gaps
 
