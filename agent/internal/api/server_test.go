@@ -338,3 +338,28 @@ func TestReputationIsGuardedAndOffWithoutAKey(t *testing.T) {
 		t.Errorf("with no key configured = %d, want 404", got)
 	}
 }
+
+// The dashboard must never be cached.
+//
+// It is served from an embedded FS whose modtime is zero, so net/http emits
+// neither Last-Modified nor ETag. With no validators and no freshness
+// directives a browser may keep serving what it has — which is how somebody
+// upgrades the agent and still sees the old interface. Worse, the page carries
+// this run's API token, so a cached copy is a stale credential in the browser
+// cache that will also fail to authenticate after a restart.
+func TestDashboardIsNeverCached(t *testing.T) {
+	h := newTestServer(t).Handler()
+	for _, path := range []string{"/", "/index.html"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "127.0.0.1:8973"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d", path, rec.Code)
+		}
+		cc := rec.Header().Get("Cache-Control")
+		if !strings.Contains(cc, "no-store") {
+			t.Errorf("%s: Cache-Control = %q, want it to contain no-store", path, cc)
+		}
+	}
+}

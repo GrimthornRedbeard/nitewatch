@@ -788,6 +788,22 @@ func (s *Server) dashboardHandler(next http.Handler) http.Handler {
 		}
 		body := strings.Replace(string(page), "__NITEWATCH_TOKEN__", s.token.Value(), 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// Never cache this page. Two reasons, and the second is the serious one:
+		//
+		//   - It is served from an embedded filesystem whose modification time
+		//     is zero, so net/http emits no Last-Modified and no ETag. With no
+		//     validators and no freshness directives, a browser is free to keep
+		//     serving whatever it has — which is how somebody upgrades the agent
+		//     and still sees the previous version's interface.
+		//   - The page carries this run's API token, substituted above. A cached
+		//     copy holds a token from an earlier run, which is both a stale
+		//     credential sitting in the browser cache and a page that will fail
+		//     to authenticate after a restart.
+		//
+		// It is a small file served over loopback. There is nothing to gain by
+		// caching it and two distinct ways for it to go wrong.
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
 		_, _ = w.Write([]byte(body))
 	})
 }
