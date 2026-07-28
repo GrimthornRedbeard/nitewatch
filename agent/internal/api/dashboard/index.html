@@ -258,11 +258,18 @@
   tr.grouphead > td { background: var(--panel-2); font-size: 15px; padding: 12px 15px;
     white-space: normal; max-width: none; }
   tr.grouphead:hover > td { background: var(--accent-soft); }
-  tr.grouphead .tw { color: var(--dim); margin-right: 10px; font-size: 12px;
-    display: inline-block; width: 10px; }
+  tr.grouphead .tw { color: var(--accent); margin-right: 12px; font-size: 19px;
+    display: inline-block; width: 18px; line-height: 1; text-align: center;
+    transition: transform .18s ease, color .18s ease; }
+tr.grouphead:hover .tw { color: var(--fg); }
+/* One glyph that turns, rather than two that swap. The rotation is what
+   tells you the row opened; swapping ▸ for ▾ says the same thing without
+   the motion that makes it obvious which row you just hit. */
+tr.grouphead.open .tw { transform: rotate(90deg); }
   tr.grouphead .gname { font-weight: 700; color: var(--accent); cursor: pointer; }
   tr.grouphead .gname:hover { text-decoration: underline; }
-  tr.grouphead .gname::after { content: " ›"; opacity: .6; }
+  tr.grouphead .gname::after { content: " ›"; opacity: .75; font-size: 17px;
+    font-weight: 700; }
   tr.grouphead .gmeta { color: var(--muted); font-size: 13.5px; margin-left: 12px; }
   tr.grouphead .gbytes { color: var(--muted); font-size: 13.5px; margin-left: 14px;
     font-variant-numeric: tabular-nums; }
@@ -291,8 +298,16 @@
   .tale { font-size: 16.5px; line-height: 1.72; color: var(--fg); margin: 16px 0 0;
     padding: 16px 18px; background: var(--bg-2); border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0; }
-  .stepstoggle { margin-top: 14px; font-size: 14px; color: var(--accent);
+  .footdocs { margin-top: 12px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .footdocs a { font-weight: 600; font-size: 14px; }
+  .stepstoggle { margin-top: 14px; font-size: 15px; color: var(--accent);
     cursor: pointer; user-select: none; font-weight: 600; }
+  /* The arrow is CSS rather than part of the label, so it can be sized
+     independently of the words and turned instead of swapped. */
+  .stepstoggle::before { content: "▸"; display: inline-block; font-size: 19px;
+    line-height: 1; width: 16px; margin-right: 6px; vertical-align: -2px;
+    transition: transform .18s ease; }
+  .stepstoggle.open::before { transform: rotate(90deg); }
   .stepstoggle:hover { text-decoration: underline; }
   .chain { list-style: none; margin: 16px 0 0; padding: 0; }
   .chain li { position: relative; padding: 0 0 20px 28px; border-left: 2px solid var(--line); }
@@ -561,7 +576,8 @@
       Explain everything
     </label>
     <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
-    <button class="btn" id="help-btn" title="What this does not do, and where it is headed">About</button>
+    <button class="btn" id="help-btn"
+      title="Known bugs and limitations, and the roadmap — both built into this build">Limits &amp; roadmap</button>
     <button class="btn" id="group-btn" title="Group connections by program, or list them flat">Grouped</button>
     <button class="btn" id="cols-btn" title="Choose which columns to show">Columns</button>
     <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
@@ -671,7 +687,13 @@
   <div class="foot"><b>Click a program name</b> for everything it is doing —
     what started it, everywhere it talks, how much it sends.
     <b>Click anywhere else in a row</b> for the chain of events behind that one
-    connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+    connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.
+    <div class="footdocs">
+      <a href="#" id="foot-limits">Known bugs &amp; limitations</a>
+      <a href="#" id="foot-roadmap">Roadmap — what is coming</a>
+      <a href="#" id="foot-terms">The disclaimer you accepted</a>
+      <a href="#" id="foot-tip">Tip the author</a>
+    </div></div>
 </div>
 
 <!-- Shown before anything else, and not dismissible except by deciding. -->
@@ -679,7 +701,7 @@
   <div class="box">
     <h2 id="terms-headline"></h2>
     <div id="terms-plain" class="termsbody"></div>
-    <div class="stepstoggle" id="terms-toggle">▸ Show the formal wording</div>
+    <div class="stepstoggle" id="terms-toggle">Show the formal wording</div>
     <pre id="terms-formal" class="termsformal" hidden></pre>
     <p class="hint" style="margin:4px 0 0">
       <a href="#" id="terms-limits">Known limitations</a> — what this does not do — and
@@ -806,7 +828,7 @@
     <p class="hint" id="story-sub" style="color:var(--muted);font-size:12px;margin:0"></p>
     <p class="tale" id="story-tale" hidden></p>
     <div class="lookup" id="story-lookup"></div>
-    <div class="stepstoggle" id="story-toggle">▸ Show the individual events</div>
+    <div class="stepstoggle" id="story-toggle">Show the individual events</div>
     <div id="story-steps-wrap" hidden><ol class="chain" id="story-chain"></ol></div>
     <p class="why">This chain is reconstructed from the causal event graph — each step is
       an event that <em>caused</em> the next, ordered by logical (Lamport) clock rather than
@@ -1229,6 +1251,25 @@
     showDoc(which || "limits");
   }
   $("help-btn").addEventListener("click", () => openHelp("limits"));
+  const footDoc = (which) => (e) => { e.preventDefault(); openHelp(which); };
+  $("foot-limits").addEventListener("click", footDoc("limits"));
+  $("foot-roadmap").addEventListener("click", footDoc("roadmap"));
+  $("foot-tip").addEventListener("click", (e) => { e.preventDefault(); openTip(); });
+  $("foot-terms").addEventListener("click", async (e) => {
+    e.preventDefault();
+    try {
+      const t = await getJSON("/api/terms");
+      $("terms-headline").textContent = t.headline;
+      $("terms-plain").replaceChildren(termsMarkup(t.plain));
+      $("terms-formal").textContent = t.formal;
+      // Already accepted, so this is a read, not a gate: no page lock, and the
+      // buttons become a way out rather than a decision.
+      $("terms-accept").textContent = "Close";
+      $("terms-decline").hidden = true;
+      $("terms-note").textContent = "You accepted these on this computer. Re-reading them changes nothing.";
+      $("terms-modal").classList.add("show");
+    } catch (err) { /* nothing useful to say if the agent will not answer */ }
+  });
   $("help-close").addEventListener("click", () => $("help-modal").classList.remove("show"));
   $("help-modal").addEventListener("click", (e) => {
     if (e.target === $("help-modal")) $("help-modal").classList.remove("show");
@@ -1375,11 +1416,16 @@
   $("terms-toggle").addEventListener("click", () => {
     const el = $("terms-formal");
     el.hidden = !el.hidden;
-    $("terms-toggle").textContent = (el.hidden ? "▸ Show" : "▾ Hide") + " the formal wording";
+    $("terms-toggle").classList.toggle("open", !el.hidden);
+    $("terms-toggle").textContent = (el.hidden ? "Show" : "Hide") + " the formal wording";
   });
 
   $("terms-accept").addEventListener("click", async () => {
     const b = $("terms-accept");
+    if (b.textContent === "Close") {          // re-reading, not accepting
+      $("terms-modal").classList.remove("show");
+      return;
+    }
     b.disabled = true;
     try {
       const r = await post("/api/terms/accept");
@@ -1636,7 +1682,7 @@
     tr.classList.toggle("open", open);
     const n = g.rows.length;
     tr.firstElementChild.innerHTML =
-      `<span class="tw">${open ? "▾" : "▸"}</span>` +
+      `<span class="tw">▸</span>` +
       `<span class="gname" data-group-img="${esc(g.image)}" ` +
       `title="See everything known about this program">${esc(shortImage(g.image))}</span>` +
       `<span class="gmeta">${n} connection${n === 1 ? "" : "s"} · ` +
@@ -2369,7 +2415,8 @@
   $("story-toggle").addEventListener("click", () => {
     const w = $("story-steps-wrap");
     w.hidden = !w.hidden;
-    $("story-toggle").textContent = (w.hidden ? "▸ Show" : "▾ Hide") + " the individual events";
+    $("story-toggle").classList.toggle("open", !w.hidden);
+    $("story-toggle").textContent = (w.hidden ? "Show" : "Hide") + " the individual events";
   });
   $("story-close").addEventListener("click", () => $("story-modal").classList.remove("show"));
   $("story-modal").addEventListener("click", (e) => {
