@@ -254,6 +254,27 @@
   input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
   .saved { color: var(--ok); font-size: 14px; margin-left: 12px; font-weight: 600; }
 
+  tr.grouphead { cursor: pointer; }
+  tr.grouphead > td { background: var(--panel-2); font-size: 15px; padding: 12px 15px;
+    white-space: normal; max-width: none; }
+  tr.grouphead:hover > td { background: var(--accent-soft); }
+  tr.grouphead .tw { color: var(--dim); margin-right: 10px; font-size: 12px;
+    display: inline-block; width: 10px; }
+  tr.grouphead .gname { font-weight: 700; color: var(--accent); cursor: pointer; }
+  tr.grouphead .gname:hover { text-decoration: underline; }
+  tr.grouphead .gname::after { content: " ›"; opacity: .6; }
+  tr.grouphead .gmeta { color: var(--muted); font-size: 13.5px; margin-left: 12px; }
+  tr.grouphead .gbytes { color: var(--muted); font-size: 13.5px; margin-left: 14px;
+    font-variant-numeric: tabular-nums; }
+  tr.grouphead > td { position: sticky; left: 0; }
+  tr.grouphead.open > td { border-bottom-color: var(--accent); }
+  /* Children are indented and quieter, so the eye reads groups first. */
+  tr.child > td:first-child { padding-left: 34px; }
+  tr.child > td { font-size: 14.5px; }
+  /* The program cell is blanked for children, so its affordance chevron would
+     be a lone "›" pointing at nothing. */
+  tr.child td.proc::after { content: none; }
+  .btn.on { border-color: var(--accent); color: var(--accent); }
   tr.clickable { cursor: pointer; }
   tr.clickable:hover td { background: var(--accent-soft); }
 
@@ -334,6 +355,12 @@
     border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; line-height: 1.55; }
   .prog .k { color: var(--muted); font-family: var(--sans); font-weight: 600; }
   .prog .odd { color: var(--new); font-family: var(--sans); }
+  .prog .proglink { cursor: pointer; text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: var(--dim); }
+  .prog .proglink:hover { color: var(--accent); text-decoration-color: var(--accent); }
+  .alert .btn.trace { border-color: var(--fix-line); background: var(--fix-bg);
+    color: var(--fix-fg); }
+  .alert .btn.trace:hover { border-color: var(--accent); }
 
   .cause { margin: 12px 0 0; padding: 13px 15px; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
@@ -518,6 +545,7 @@
     </label>
     <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
     <button class="btn" id="help-btn" title="What this does not do, and where it is headed">About</button>
+    <button class="btn" id="group-btn" title="Group connections by program, or list them flat">Grouped</button>
     <button class="btn" id="cols-btn" title="Choose which columns to show">Columns</button>
     <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
     <button class="btn" id="settings-btn">Settings</button>
@@ -1181,6 +1209,19 @@
       </label>`).join("");
   }
 
+  function paintGroupBtn() {
+    const b = $("group-btn");
+    b.textContent = grouped ? "Grouped" : "Flat list";
+    b.classList.toggle("on", grouped);
+  }
+  $("group-btn").addEventListener("click", () => {
+    grouped = !grouped;
+    try { localStorage.setItem(GROUP_KEY, grouped ? "1" : "0"); } catch (e) { /* private mode */ }
+    paintGroupBtn();
+    $("rows").replaceChildren();   // the two layouts do not share row keys
+    render();
+  });
+
   $("cols-btn").addEventListener("click", () => {
     paintColumnList();
     $("columns").classList.toggle("show");
@@ -1276,10 +1317,75 @@
     if (tr.dataset.id !== String(c.id)) tr.dataset.id = String(c.id);
   }
 
+  // Grouped by program.
+  //
+  // A browser produces dozens of rows and they were all called "brave.exe",
+  // which made the ledger read as noise: the same name forty times, and the
+  // one line that mattered buried among them. Grouping asks the question the
+  // table is actually for — WHICH PROGRAMS are talking, and how much — and
+  // leaves the individual connections one click away.
+  const GROUP_KEY = "nitewatch.grouped";
+  let grouped = true;
+  let openGroups = new Set();
+
+  try { grouped = localStorage.getItem(GROUP_KEY) !== "0"; } catch (e) { /* private mode */ }
+
+  function groupRows(rows) {
+    const byImage = new Map();
+    for (const c of rows) {
+      const k = c.image || "";
+      let g = byImage.get(k);
+      if (!g) {
+        g = {image: k, rows: [], sent: 0, recv: 0, dests: new Set(),
+             countries: new Set(), last: "", flagged: false};
+        byImage.set(k, g);
+      }
+      g.rows.push(c);
+      g.sent += c.bytesSent || 0;
+      g.recv += c.bytesRecv || 0;
+      g.dests.add(c.domain || c.remoteIP);
+      if (c.country) g.countries.add(c.country);
+      const t = c.lastSeen || c.time;
+      if (!g.last || t > g.last) g.last = t;
+    }
+    // Busiest first by volume out, which is the column people scan for.
+    return [...byImage.values()].sort((a, b) => (b.sent + b.recv) - (a.sent + a.recv));
+  }
+
+  function groupRow(g) {
+    const tr = document.createElement("tr");
+    tr.className = "grouphead";
+    tr.dataset.group = g.image;
+    const td = document.createElement("td");
+    td.colSpan = ROW_CELLS;
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function paintGroup(tr, g) {
+    const open = openGroups.has(g.image);
+    tr.classList.toggle("open", open);
+    const n = g.rows.length;
+    tr.firstElementChild.innerHTML =
+      `<span class="tw">${open ? "▾" : "▸"}</span>` +
+      `<span class="gname" data-group-img="${esc(g.image)}" ` +
+      `title="See everything known about this program">${esc(shortImage(g.image))}</span>` +
+      `<span class="gmeta">${n} connection${n === 1 ? "" : "s"} · ` +
+      `${g.dests.size} destination${g.dests.size === 1 ? "" : "s"}` +
+      `${g.countries.size > 1 ? ` · ${g.countries.size} countries` : ""}</span>` +
+      `<span class="gbytes">↑${esc(bytes(g.sent))} ↓${esc(bytes(g.recv))}</span>`;
+    // The header cell spans every column, so it is as wide as the table — which
+    // is wider than the window. Pin its contents to the visible width instead,
+    // or the totals sit off the right edge where nobody sees them.
+    tr.firstElementChild.firstElementChild.parentElement.style.maxWidth =
+      (document.querySelector(".tablewrap")?.clientWidth || 0) + "px";
+  }
+
   function render() {
     syncCountryOptions();
     const rows = applySort(visible());
     const tb = $("rows");
+    if (grouped) return renderGrouped(rows, tb);
 
     // Index what is already on screen so nodes survive across refreshes.
     const existing = new Map();
@@ -1327,9 +1433,64 @@
     el.classList.add("bumped");
   }
 
+  // Grouped rendering reuses the same reconciler discipline: keys are the
+  // program path for headers and the connection id for children, so expanding a
+  // group does not disturb anything else and a refresh does not collapse it.
+  function renderGrouped(rows, tb) {
+    const groups = groupRows(rows);
+    const existing = new Map();
+    for (const tr of Array.from(tb.children)) {
+      existing.set(tr.dataset.group !== undefined ? "g:" + tr.dataset.group : "r:" + tr.dataset.id, tr);
+    }
+
+    let cursor = tb.firstElementChild;
+    const place = (tr) => {
+      if (tr === cursor) cursor = cursor.nextElementSibling;
+      else tb.insertBefore(tr, cursor);
+    };
+
+    for (const g of groups) {
+      const gk = "g:" + g.image;
+      let head = existing.get(gk);
+      if (head) existing.delete(gk); else head = groupRow(g);
+      paintGroup(head, g);
+      place(head);
+
+      if (!openGroups.has(g.image)) continue;
+      for (const c of g.rows) {
+        const rk = "r:" + c.id;
+        let tr = existing.get(rk);
+        const isNew = !tr;
+        if (tr) existing.delete(rk); else tr = newRow();
+        tr.classList.add("child");
+        paintRow(tr, c, isNew);
+        // The group header already says which program this is.
+        const nameCell = tr.querySelector('td[data-col="image"]');
+        if (nameCell && nameCell.textContent) nameCell.textContent = "";
+        place(tr);
+      }
+    }
+    for (const tr of existing.values()) tr.remove();
+
+    $("empty").hidden = groups.length > 0;
+    bumpStat($("c-total"), rows.length);
+    bumpStat($("c-talkers"), groups.length);
+    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    firstPaint = false;
+  }
+
   // Delegated once, rather than rebound to every row on every refresh. This is
   // also what makes node reuse safe: no listener is ever attached twice.
   $("rows").addEventListener("click", (ev) => {
+    const gname = ev.target.closest("[data-group-img]");
+    if (gname) { ev.stopPropagation(); showProcess(gname.dataset.groupImg); return; }
+    const head = ev.target.closest("tr.grouphead");
+    if (head) {
+      const k = head.dataset.group;
+      if (openGroups.has(k)) openGroups.delete(k); else openGroups.add(k);
+      render();
+      return;
+    }
     const proc = ev.target.closest("td.proc");
     if (proc) { ev.stopPropagation(); showProcess(proc.dataset.img); return; }
     const tr = ev.target.closest("tr");
@@ -1781,6 +1942,31 @@
     if (e.target === $("proc-modal")) $("proc-modal").classList.remove("show");
   });
 
+  // Opens the causal story for a connection id. The alert carries the id, the
+  // table carries the row — and if the row has scrolled out of the ledger the
+  // story is still on the server, so fetch regardless and fill in what we can.
+  async function showStoryById(id) {
+    const known = all.find(x => Number(x.id) === id);
+    if (known) { showStory(known); return; }
+    try {
+      const st = await getJSON("/api/story?id=" + encodeURIComponent(id));
+      $("story-title").textContent = "What led to this";
+      $("story-sub").textContent = "";
+      $("story-tale").textContent = st.narrative || "";
+      $("story-chain").innerHTML = (st.steps || []).map(s =>
+        `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
+        (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
+        (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("");
+      $("story-steps-wrap").hidden = false;
+      $("story-lookup").innerHTML = "";
+      $("story-modal").classList.add("show");
+    } catch (e) {
+      $("story-title").textContent = "Could not load the story";
+      $("story-tale").textContent = String(e.message || e);
+      $("story-modal").classList.add("show");
+    }
+  }
+
   async function showStory(c) {
     if (!c.hasStory) return;
     try {
@@ -1968,8 +2154,11 @@
     const p = ev && (ev.ImagePath || ev.TargetPath || ev.Target);
     if (!p) return "";
     const odd = /\\(appdata|downloads|temp|public|programdata)\\/i.test(p);
+    // Clickable, because this is the shortest path from "something touched my
+    // passwords" to "here is what started it and everywhere else it went".
     return `<div class="prog"><span class="k">Program:</span> ` +
-      `<span class="${odd ? "odd" : ""}">${esc(p)}</span>` +
+      `<span class="proglink ${odd ? "odd" : ""}" data-alert-img="${esc(p)}" ` +
+      `title="See everything known about this program">${esc(p)}</span>` +
       (odd ? ` <span class="k">— not where installed software normally lives</span>` : "") +
       `</div>`;
   }
@@ -1978,7 +2167,16 @@
   // doing. This is the "why did that happen?" that a flat log cannot answer.
   function causeHTML(ev) {
     const c = ev && ev.Context;
-    if (!c || !(c.lineage || []).length) return "";
+    if (!c || !(c.lineage || []).length) {
+      // Rendering nothing here used to leave the reader with no explanation and
+      // no sign that one was even attempted.
+      const p = ev && (ev.ImagePath || ev.TargetPath || ev.Target);
+      return `<div class="cause"><h4>What led to this</h4>
+        <div class="note">The chain of events behind this could not be reconstructed —
+        usually because the program started before NiteWatch did, so its parent was
+        never seen.${p ? ` Everything else known about it is under
+        <b>What led to this</b> below.` : ""}</div></div>`;
+    }
     const acts = (c.recent || []).map(a =>
       `<li>${esc(activityLabel(a.kind))}${a.detail ? " " + esc(a.detail) : ""}` +
       (a.count > 1 ? ` <span class="cnt">×${a.count}</span>` : "") + `</li>`).join("");
@@ -2007,6 +2205,11 @@
     return isDrill(a) ? `<span class="sev drill">TEST</span>` : "";
   }
 
+  function alertImage(a) {
+    const ev = a.evidence || {};
+    return ev.ImagePath || ev.TargetPath || ev.Target || "";
+  }
+
   function alertHTML(a) {
     const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
     return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}${isDrill(a) ? " drill" : ""}" data-alert-id="${esc(a.id)}" data-sig="${esc(alertSig(a))}">
@@ -2016,6 +2219,10 @@
       ${steps ? `<ol>${steps}</ol>` : ""}
       ${causeHTML(a.evidence)}
       <div class="act" id="acts-${a.id}">
+        ${alertImage(a) ? `<button class="btn trace" data-alert-img="${esc(alertImage(a))}"
+          title="What started it, everywhere it talks, every alert about it">What led to this</button>` : ""}
+        ${a.connId > 0 ? `<button class="btn trace" data-alert-conn="${a.connId}"
+          title="The chain of events behind this exact connection">See this connection</button>` : ""}
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
         <button class="btn" data-allow="${a.id}" title="Stop warning about this program contacting this destination. Other programs and destinations are unaffected.">This is expected — always allow</button>
       </div>
@@ -2079,6 +2286,10 @@
 
   // Delegated once for the whole list, so reused cards keep working.
   $("alerts").addEventListener("click", async (ev) => {
+    const img = ev.target.closest("[data-alert-img]");
+    if (img) { showProcess(img.dataset.alertImg); return; }
+    const conn = ev.target.closest("[data-alert-conn]");
+    if (conn) { showStoryById(Number(conn.dataset.alertConn)); return; }
     const allow = ev.target.closest("[data-allow]");
     if (allow) {
       await post("/api/alerts/allow?id=" + encodeURIComponent(allow.dataset.allow));
@@ -2196,6 +2407,7 @@
 
   showTermsIfNeeded();
   loadColumns();
+  paintGroupBtn();
   paintHeaders();
   refresh();
   setInterval(refresh, 5000);

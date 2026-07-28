@@ -56,24 +56,46 @@ var credentialPaths = []struct {
 	Fragment string
 	What     string
 	Owner    string // the process expected to read it, "" if many
+	// AlsoUnder, when set, must ALSO appear in the path. Needed where the
+	// interesting filename is not unique enough on its own and the directory
+	// that would qualify it has a random component — Firefox profiles are
+	// `...\Mozilla\Firefox\Profiles\<random>.default\logins.json`, so no
+	// single substring covers both ends.
+	AlsoUnder string
 }{
-	{`\google\chrome\user data\default\login data`, "your saved Chrome passwords", "chrome.exe"},
-	{`\google\chrome\user data\default\cookies`, "your Chrome cookies", "chrome.exe"},
-	{`\bravesoftware\brave-browser\user data\default\login data`, "your saved Brave passwords", "brave.exe"},
-	{`\microsoft\edge\user data\default\login data`, "your saved Edge passwords", "msedge.exe"},
-	{`\mozilla\firefox\profiles\`, "your Firefox profile, which stores saved passwords", "firefox.exe"},
-	{`\.ssh\id_`, "your SSH private key", ""},
-	{`\.aws\credentials`, "your AWS access keys", ""},
-	{`\.config\gcloud\`, "your Google Cloud credentials", ""},
-	{`\.kube\config`, "your Kubernetes credentials", ""},
-	{`\appdata\roaming\bitcoin\wallet.dat`, "your Bitcoin wallet", ""},
-	{`\appdata\roaming\ethereum\keystore`, "your Ethereum keystore", ""},
-	{`\appdata\roaming\exodus\`, "your Exodus crypto wallet", ""},
-	{`\appdata\local\packages\microsoft.windows.cloudexperiencehost`, "", ""}, // excluded below
-	{`\appdata\roaming\discord\local storage`, "your Discord session tokens", "discord.exe"},
-	{`\appdata\roaming\telegram desktop\tdata`, "your Telegram session", "telegram.exe"},
-	{`\keepass`, "your KeePass password database", ""},
-	{`.kdbx`, "your KeePass password database", ""},
+	{`\google\chrome\user data\default\login data`, "your saved Chrome passwords", "chrome.exe", ""},
+	{`\google\chrome\user data\default\cookies`, "your Chrome cookies", "chrome.exe", ""},
+	{`\bravesoftware\brave-browser\user data\default\login data`, "your saved Brave passwords", "brave.exe", ""},
+	{`\microsoft\edge\user data\default\login data`, "your saved Edge passwords", "msedge.exe", ""},
+	// Firefox, matched on the FILES that hold credentials rather than on the
+	// whole profile.
+	//
+	// This previously matched `\mozilla\firefox\profiles\`, so reading a
+	// bookmark, a preference, a cached favicon or an extension raised a
+	// CRITICAL "information stealer" alert. Dell's support agent tripped it on
+	// a live machine by touching something harmless in there. Every other
+	// browser in this list matches one specific file; Firefox was the odd one
+	// out, and it was the broad one.
+	//
+	// Extracting passwords needs logins.json AND the key database, so either
+	// being read is worth reporting.
+	{`logins.json`, "your saved Firefox passwords", "firefox.exe", `\mozilla\firefox\`},
+	{`key4.db`, "the key that decrypts your saved Firefox passwords", "firefox.exe", `\mozilla\firefox\`},
+	{`key3.db`, "the key that decrypts your saved Firefox passwords", "firefox.exe", `\mozilla\firefox\`},
+	{`signons.sqlite`, "your saved Firefox passwords", "firefox.exe", `\mozilla\firefox\`},
+	{`cookies.sqlite`, "your Firefox cookies, which can be used to sign in as you", "firefox.exe", `\mozilla\firefox\`},
+	{`\.ssh\id_`, "your SSH private key", "", ""},
+	{`\.aws\credentials`, "your AWS access keys", "", ""},
+	{`\.config\gcloud\`, "your Google Cloud credentials", "", ""},
+	{`\.kube\config`, "your Kubernetes credentials", "", ""},
+	{`\appdata\roaming\bitcoin\wallet.dat`, "your Bitcoin wallet", "", ""},
+	{`\appdata\roaming\ethereum\keystore`, "your Ethereum keystore", "", ""},
+	{`\appdata\roaming\exodus\`, "your Exodus crypto wallet", "", ""},
+	{`\appdata\local\packages\microsoft.windows.cloudexperiencehost`, "", "", ""}, // excluded below
+	{`\appdata\roaming\discord\local storage`, "your Discord session tokens", "discord.exe", ""},
+	{`\appdata\roaming\telegram desktop\tdata`, "your Telegram session", "telegram.exe", ""},
+	{`\keepass`, "your KeePass password database", "", ""},
+	{`.kdbx`, "your KeePass password database", "", ""},
 }
 
 // ransomNoteNames are the filenames ransomware leaves behind. Matching these is
@@ -142,9 +164,13 @@ func CredentialInfo(path string) (what, owner string) {
 		if c.What == "" {
 			continue // placeholder exclusions
 		}
-		if strings.Contains(p, c.Fragment) {
-			return c.What, c.Owner
+		if !strings.Contains(p, c.Fragment) {
+			continue
 		}
+		if c.AlsoUnder != "" && !strings.Contains(p, c.AlsoUnder) {
+			continue
+		}
+		return c.What, c.Owner
 	}
 	return "", ""
 }
