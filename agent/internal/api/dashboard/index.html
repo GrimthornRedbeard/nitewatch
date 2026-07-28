@@ -466,6 +466,10 @@
     border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
   .doc strong { color: var(--accent); }
   .doc hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+  .askbox { width: 100%; height: 34vh; resize: vertical; background: var(--bg-2);
+    color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; font: 400 13px/1.6 var(--mono); }
+  .askbox:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
   .gloss { display: grid; gap: 16px; }
   .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
   .gloss dd { margin: 4px 0 0; color: var(--fg); font-size: 15px; line-height: 1.65; }
@@ -706,6 +710,33 @@
   </div>
 </div>
 
+<div class="modal" id="ask-modal">
+  <div class="box">
+    <h2>Ask someone else about this</h2>
+    <p class="hint">This builds a question you can paste into ChatGPT, Claude, Gemini,
+      a forum, or an email to somebody who knows. NiteWatch does not send it — you do,
+      by pasting it wherever you choose.</p>
+
+    <div class="opt" style="border-top:0">
+      <div><label for="ask-redact">Remove personal details</label>
+        <div class="d">Replaces your Windows username and computer name with placeholders.
+          Paths and program names stay, because they are most of what makes the question
+          answerable.</div></div>
+      <div class="ctl"><input type="checkbox" id="ask-redact" checked></div>
+    </div>
+
+    <p class="hint" style="margin:14px 0 8px"><b>This is exactly what will be copied.</b>
+      Read it before you paste it anywhere — whoever runs that service will see all of it.</p>
+    <textarea id="ask-text" class="askbox" spellcheck="false" readonly></textarea>
+
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" id="ask-copy">Copy the question</button>
+      <button class="btn" id="ask-close">Close</button>
+      <span class="saved" id="ask-copied" hidden>Copied</span>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="help-modal">
   <div class="box">
     <h2 id="help-title">About this build</h2>
@@ -755,6 +786,7 @@
 
 <script>
   let all = [];
+  let LAST_ALERTS = [];
   let VT_KEY_SET = false;
   // Everything animated is gated on this, so the whole scheme honours the
   // system setting rather than each rule remembering to.
@@ -938,6 +970,135 @@
              (c.remoteIP && c.remoteIP.toLowerCase().includes(q));
     });
   }
+
+  // ── "ask someone else about this" ─────────────────────────────────
+  // Builds a question and hands it to the user. It does NOT send anything.
+  //
+  // That is the whole design. An alert contains the username, full file paths,
+  // every address a program touched and what it did with them — a far more
+  // detailed picture of a machine than the one address or one fingerprint the
+  // other outbound features disclose. Posting that to a third party is a
+  // decision only the person whose machine it is can make, so the product
+  // stops at the clipboard and shows exactly what is on it first.
+  //
+  // It is also simply more useful this way: it works with any assistant, any
+  // forum, any knowledgeable friend, and needs no API key.
+  let ASK_ALERT = null;
+
+  // Redaction, deliberately narrow. Removing the paths would remove most of
+  // what makes the question answerable, so only the identifiers that say WHO
+  // rather than WHAT are replaced.
+  function redactPersonal(text) {
+    let out = text;
+    const users = new Set();
+    for (const m of text.matchAll(/[A-Za-z]:\\Users\\([^\\\s"]+)/g)) users.add(m[1]);
+    for (const u of users) {
+      if (u.toLowerCase() === "public" || u.toLowerCase() === "default") continue;
+      out = out.split(u).join("<user>");
+    }
+    return out;
+  }
+
+  function askText(a) {
+    const ev = a.evidence || {};
+    const ctx = ev.Context || {};
+    const lines = [];
+
+    lines.push("I'm using NiteWatch, a security tool that watches which programs on my");
+    lines.push("Windows PC talk to the internet and touch sensitive files. It raised the");
+    lines.push("alert below. It is a monitoring tool, not antivirus — it reports things,");
+    lines.push("it does not judge them, and it is explicit that it can be wrong.");
+    lines.push("");
+    lines.push("Please help me work out whether this is something to worry about.");
+    lines.push("Specifically:");
+    lines.push("  1. Is this behaviour normal for this program? Why would it do this?");
+    lines.push("  2. What would make it suspicious rather than routine?");
+    lines.push("  3. What should I actually check, in order?");
+    lines.push("  4. If it IS a problem, what do I do first?");
+    lines.push("");
+    lines.push("=== THE ALERT ===");
+    lines.push("Severity: " + (a.severity || "") + "   Rule: " + (a.ruleId || ""));
+    lines.push("Title: " + (a.title || ""));
+    lines.push("");
+    lines.push((a.narrative || "").trim());
+    lines.push("");
+    if (ev.ImagePath || ev.TargetPath || ev.Target) {
+      lines.push("Program: " + (ev.ImagePath || ev.TargetPath || ev.Target));
+    }
+    for (const [label, key] of [["Destination", "Destination"], ["Address", "RemoteIP"],
+                                ["Network owner", "Owner"], ["Country", "Country"],
+                                ["File it opened", "SecretPath"]]) {
+      if (ev[key]) lines.push(label + ": " + ev[key]);
+    }
+    if ((a.playbook || []).length) {
+      lines.push("");
+      lines.push("What NiteWatch suggested:");
+      a.playbook.forEach((p, i) => lines.push("  " + (i + 1) + ". " + p));
+    }
+
+    if ((ctx.lineage || []).length) {
+      lines.push("");
+      lines.push("=== WHAT LED TO THIS (from the causal event graph) ===");
+      lines.push("Chain: " + ctx.lineage.join(" -> "));
+      if (ctx.launchedBy) {
+        lines.push(ctx.userLaunched
+          ? "Started from " + ctx.launchedBy + ", which usually means I opened it."
+          : "Started by " + ctx.launchedBy + " — not launched from the desktop.");
+      }
+      if ((ctx.recent || []).length) {
+        lines.push("");
+        lines.push("What that program was doing around the same time:");
+        for (const act of ctx.recent) {
+          lines.push("  - " + activityLabel(act.kind) + (act.detail ? " " + act.detail : "") +
+            (act.count > 1 ? " (x" + act.count + ")" : ""));
+        }
+      }
+      lines.push("");
+      lines.push("(NiteWatch cannot see mouse or keyboard input, so it cannot tell whether");
+      lines.push("I clicked something. The above is only what the programs did.)");
+    } else {
+      lines.push("");
+      lines.push("(NiteWatch could not reconstruct what led to this — usually because the");
+      lines.push("program started before it did, so the parent process was never seen.)");
+    }
+    return lines.join("\n");
+  }
+
+  function paintAsk() {
+    if (!ASK_ALERT) return;
+    const raw = askText(ASK_ALERT);
+    $("ask-text").value = $("ask-redact").checked ? redactPersonal(raw) : raw;
+  }
+
+  function openAsk(id) {
+    ASK_ALERT = (LAST_ALERTS || []).find(a => String(a.id) === String(id));
+    if (!ASK_ALERT) return;
+    $("ask-copied").hidden = true;
+    paintAsk();
+    $("ask-modal").classList.add("show");
+  }
+
+  $("ask-redact").addEventListener("change", paintAsk);
+  $("ask-close").addEventListener("click", () => $("ask-modal").classList.remove("show"));
+  $("ask-modal").addEventListener("click", (e) => {
+    if (e.target === $("ask-modal")) $("ask-modal").classList.remove("show");
+  });
+  $("ask-copy").addEventListener("click", async () => {
+    const box = $("ask-text");
+    try {
+      await navigator.clipboard.writeText(box.value);
+    } catch (e) {
+      // Clipboard access can be refused; selecting the text still lets the
+      // user copy it themselves, which is the point of showing it.
+      box.removeAttribute("readonly");
+      box.select();
+      document.execCommand && document.execCommand("copy");
+      box.setAttribute("readonly", "");
+    }
+    const tag = $("ask-copied");
+    tag.hidden = false;
+    setTimeout(() => { tag.hidden = true; }, 2200);
+  });
 
   // ── the embedded document ─────────────────────────────────────────
   // A small markdown renderer for ONE trusted document that ships inside the
@@ -2221,6 +2382,8 @@
       <div class="act" id="acts-${a.id}">
         ${alertImage(a) ? `<button class="btn trace" data-alert-img="${esc(alertImage(a))}"
           title="What started it, everywhere it talks, every alert about it">What led to this</button>` : ""}
+        <button class="btn trace" data-alert-ask="${a.id}"
+          title="Build a question you can paste into an AI or send to someone">Ask about this</button>
         ${a.connId > 0 ? `<button class="btn trace" data-alert-conn="${a.connId}"
           title="The chain of events behind this exact connection">See this connection</button>` : ""}
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
@@ -2234,6 +2397,7 @@
       const list = await getJSON("/api/alerts?limit=50") || [];
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
+      LAST_ALERTS = open;   // so "Ask about this" can rebuild the full question
 
       // Reconciled by alert id, for the same reason as the table — and one
       // more: an alert card holds state the server knows nothing about. If you
@@ -2290,6 +2454,8 @@
     if (img) { showProcess(img.dataset.alertImg); return; }
     const conn = ev.target.closest("[data-alert-conn]");
     if (conn) { showStoryById(Number(conn.dataset.alertConn)); return; }
+    const ask = ev.target.closest("[data-alert-ask]");
+    if (ask) { openAsk(ask.dataset.alertAsk); return; }
     const allow = ev.target.closest("[data-allow]");
     if (allow) {
       await post("/api/alerts/allow?id=" + encodeURIComponent(allow.dataset.allow));
