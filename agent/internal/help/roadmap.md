@@ -37,10 +37,6 @@ promise. The order is roughly the order of work.
 These are what stand between the current state and something worth installing
 on somebody else's machine.
 
-- **Code signing.** The single biggest one. Right now Windows SmartScreen warns
-  about NiteWatch and is entirely right to. Until the binary is signed, asking
-  anyone to run it means asking them to ignore a warning that exists for good
-  reason — which is a bad habit to teach.
 - **An installer, and running as a service.** Today it is a console application
   started by hand, which means it is not watching when you are not looking.
 - **A measured false-positive rate.** The number that decides whether the tuning
@@ -71,6 +67,29 @@ on somebody else's machine.
   machine is redistribution rather than use.
 - **A real false-positive test suite** — a recorded week of ordinary desktop
   activity, replayed on every change, with the alert count as a build gate.
+
+---
+
+## Decided against, for now
+
+**Code signing.** Not being paid for at this stage, so this build is unsigned and
+the next one will be too. Windows will call it an unrecognised app from an unknown
+publisher, and on Windows 11 with Smart App Control switched on it will not run at
+all — that feature blocks unsigned executables outright.
+
+Worth being precise about what a signature would fix, because the common belief is
+wrong. It would not remove that warning. Microsoft withdrew the behaviour where an
+Extended Validation certificate granted instant reputation, and their own guidance
+now says paying extra for EV to avoid SmartScreen warnings is no longer justified.
+Every purchasable certificate still produces an unrecognised-app warning on first
+download; only shipping through the Microsoft Store avoids it.
+
+What it would buy is a real publisher name in that dialog instead of "unknown", and
+reputation that carries between releases rather than restarting at zero every time.
+Both are worth having. Neither is worth paying for before anybody has downloaded the
+thing, and a certificate bought today would spend its first year accruing reputation
+from an audience of nobody. Revisited when there is an audience for it to accrue
+from.
 
 ---
 

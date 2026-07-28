@@ -174,9 +174,15 @@ specifically.
 
 ## Operational
 
-- **Unsigned binary.** SmartScreen and some AV will flag it, and the behaviour
-  that makes it useful — reading kernel telemetry, opening a listener — looks
-  like malware to heuristics. Code signing is unresolved.
+- **Unsigned binary, by decision rather than oversight.** Windows will call it
+  an unrecognised app from an unknown publisher, and **on Windows 11 with Smart
+  App Control enabled it will not run at all** — that feature blocks unsigned
+  executables outright. Some antivirus will flag it too, because the behaviour
+  that makes it useful (reading kernel telemetry, opening a listener) is the
+  behaviour malware has. A signature would not remove the warning — Microsoft
+  withdrew instant reputation for Extended Validation certificates — it would
+  only put a real name in the dialog and let reputation carry between releases.
+  See the roadmap for the reasoning.
 - **No installer, no service, no auto-update.** It runs as a console
   application started by hand.
 - **Feed licensing is not settled.** Several high-quality sources are unusable
