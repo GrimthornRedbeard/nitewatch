@@ -225,6 +225,10 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")
 			ne.PPID = u32(e.EventData, 0, "ParentProcessID", "ParentPID")
 			ne.Image = normalizeImagePath(str(e.EventData, "ImageName", "ImagePath", "ProcessName"))
+			// ProcessStartKey is monotonic and never reused, which is what a
+			// PID is not. Present from Windows 10 1809; zero on older builds,
+			// where attribution falls back to start/exit times alone.
+			ne.StartKey = u64(e.EventData, "ProcessStartKey", "ProcessSequenceNumber")
 		case "End":
 			ne.Kind = event.KindProcExit
 			ne.PID = u32(e.EventData, ne.PID, "ProcessID", "PID")

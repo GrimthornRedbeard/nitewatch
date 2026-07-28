@@ -167,6 +167,15 @@ func (c *Collector) seedProcessTable() {
 		byPID[p.PID] = p
 	}
 	seeded := map[uint32]bool{}
+	// One instant for the whole seed, not time.Now() per process.
+	//
+	// These processes really started at some unknown point in the past, and the
+	// honest statement the timeline can make is "known to be running as of
+	// here". Using a single instant makes that consistent: every seeded tenure
+	// begins together, so an event from after the agent started resolves to the
+	// right one, and the ordering between seeded processes — which we do not
+	// actually know — is never implied.
+	seededAt := time.Now()
 	var seed func(p ProcInfo, depth int)
 	seed = func(p ProcInfo, depth int) {
 		if seeded[p.PID] || depth > 32 { // depth guard: PID tables can cycle
@@ -178,7 +187,7 @@ func (c *Collector) seedProcessTable() {
 		seeded[p.PID] = true
 		c.window.Ingest(event.NormalizedEvent{
 			Kind: event.KindProcStart, PID: p.PID, PPID: p.PPID,
-			Image: p.Image, Time: time.Now(),
+			Image: p.Image, Time: seededAt,
 		})
 		if len(p.Services) > 0 {
 			c.serviceNames[p.PID] = p.Services
@@ -284,7 +293,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		// Write the story as prose while the graph still holds the events. A
 		// list of steps asks the reader to assemble the meaning; a sentence
 		// hands it to them.
-		pctx := c.window.Current().ContextFor(e.PID)
+		pctx := c.window.Current().ContextAt(e.PID, e.Time)
 		st.Context = &pctx
 		st.Narrative = graph.Narrate(st, pctx, graph.Peer{
 			IP: peerIP, Port: peerPort, Domain: domain,
@@ -362,7 +371,7 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 		FirstContact: c.firstContact,
 	}
 	c.suppress.Observe(conn.Image, e.Time)
-	connCtx := c.window.Current().ContextFor(e.PID)
+	connCtx := c.window.Current().ContextAt(e.PID, e.Time)
 	for _, d := range c.opts.Detect.Evaluate(subject) {
 		if v := c.suppress.Check(d, subject, e.Time); v.Suppressed {
 			continue
@@ -393,7 +402,7 @@ func imageFor(e event.NormalizedEvent, c *Collector) string {
 	if e.Image != "" {
 		return e.Image
 	}
-	if img := c.window.Current().ImageFor(e.PID); img != "" {
+	if img := c.window.Current().ImageAt(e.PID, e.Time); img != "" {
 		return img
 	}
 	return c.lookupImage(e.PID)

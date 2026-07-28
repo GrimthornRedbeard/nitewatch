@@ -32,12 +32,17 @@ const (
 // JSON tags are load-bearing: the replay source and testdata fixtures serialize
 // to exactly these names.
 type NormalizedEvent struct {
-	Seq   uint64    `json:"seq"` // monotonic within a run; assigned by the source
-	Kind  Kind      `json:"kind"`
-	Time  time.Time `json:"time"`
-	PID   uint32    `json:"pid"`
-	PPID  uint32    `json:"ppid,omitempty"`  // ProcStart only
-	Image string    `json:"image,omitempty"` // full path to the acting process image
+	Seq  uint64    `json:"seq"` // monotonic within a run; assigned by the source
+	Kind Kind      `json:"kind"`
+	Time time.Time `json:"time"`
+	PID  uint32    `json:"pid"`
+	PPID uint32    `json:"ppid,omitempty"` // ProcStart only
+	// StartKey is Windows' ProcessStartKey: monotonically increasing and never
+	// reused, unlike a PID. Present on ProcStart from Windows 10 1809 onward,
+	// zero otherwise. It is what makes "is this the same process?" an exact
+	// question rather than a guess.
+	StartKey uint64 `json:"startKey,omitempty"`
+	Image    string `json:"image,omitempty"` // full path to the acting process image
 
 	// Network (NetConnect). The kernel reports source/destination relative to
 	// the packet, so on inbound traffic the "destination" is the LOCAL host.

@@ -5,15 +5,18 @@
 package graph
 
 import (
+	"time"
+
 	gr "github.com/ShaneDolphin/gorapide"
 	"github.com/threattape/nitewatch/agent/internal/event"
-	"strings"
 )
 
 type Graph struct {
-	p          *gr.Poset
-	procNode   map[uint32]gr.EventID // PID -> latest live process node
-	procImage  map[uint32]string     // PID -> image path of the live process
+	p *gr.Poset
+	// procs maps a PID to the succession of processes that have held it, so an
+	// event can be attributed to whichever one was running when it happened
+	// rather than to whoever holds the number now. See occupancy.go.
+	procs      procTable
 	dnsByIP    map[string]dnsRecord  // resolved IP -> most-recent resolution
 	connDomain map[gr.EventID]string // connection node -> domain it dialed
 }
@@ -26,8 +29,7 @@ type dnsRecord struct {
 func New() *Graph {
 	return &Graph{
 		p:          gr.NewPoset(),
-		procNode:   make(map[uint32]gr.EventID),
-		procImage:  make(map[uint32]string),
+		procs:      make(procTable),
 		dnsByIP:    make(map[string]dnsRecord),
 		connDomain: make(map[gr.EventID]string),
 	}
@@ -35,10 +37,30 @@ func New() *Graph {
 
 func (g *Graph) Poset() *gr.Poset { return g.p }
 
-// ImageFor returns the image path of the live process with this PID, or "" if
-// unknown. Network/file events carry a PID but no image, so attribution comes
-// from the ProcStart the graph already recorded.
-func (g *Graph) ImageFor(pid uint32) string { return g.procImage[pid] }
+// ImageFor returns the image path of the process currently holding this PID,
+// or "" if unknown. Network and file events carry a PID but no image, so
+// attribution comes from the ProcStart the graph already recorded.
+//
+// Prefer ImageAt when the caller knows when the event happened: this reports
+// the CURRENT holder, which is only the right answer for something happening
+// now.
+func (g *Graph) ImageFor(pid uint32) string {
+	if o, ok := g.procs.liveAt(pid); ok {
+		return o.image
+	}
+	if o, ok := g.procs.at(pid, time.Time{}); ok {
+		return o.image
+	}
+	return ""
+}
+
+// ImageAt returns the image that held this PID at the given instant.
+func (g *Graph) ImageAt(pid uint32, when time.Time) string {
+	if o, ok := g.procs.at(pid, when); ok {
+		return o.image
+	}
+	return ""
+}
 
 // DomainFor returns the domain a connection node dialed, joined from a prior
 // DNS resolution, or "" if the connection went to a raw IP with no lookup.
@@ -85,56 +107,44 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 	})
 	_ = g.p.AddEvent(ev)
 
-	// Before attributing anything, check the PID still means what we think.
-	//
-	// Windows recycles PIDs aggressively, and Chromium-based applications churn
-	// through short-lived children faster than anything else on a desktop. When
-	// a process exits without its exit event being seen — or starts without its
-	// start event being seen — the next occupant of that PID inherits the
-	// previous one's node, and every file and connection it produces is chained
-	// onto a stranger's history.
-	//
-	// That is not theoretical: a live machine produced "brave.exe wrote files in
-	// AppData\Roaming\Claude" and "claude.exe wrote files in
-	// BraveSoftware\Brave-Browser", which is what this looks like from the
-	// outside. Both programs are Electron, both spawn many children, and both
-	// were blamed for the other's work.
-	//
-	// An event that carries its own image is proof of the current occupant, so
-	// a disagreement is proof of reuse. Drop the stale mapping rather than
-	// chain onto it: losing the causal link is a gap, attributing it to the
-	// wrong program is a false statement.
+	// An event that carries its own image is direct evidence of who held the PID
+	// at that moment. If it disagrees with the tenure we would otherwise use,
+	// the PID changed hands without us seeing it — close the old tenure and
+	// open one for the newcomer, rather than chaining this event onto a
+	// stranger's history.
 	if e.Kind != event.KindProcStart && e.Image != "" {
-		if known, ok := g.procImage[e.PID]; ok && !sameImage(known, e.Image) {
-			delete(g.procNode, e.PID)
-			delete(g.procImage, e.PID)
+		if known, ok := g.procs.at(e.PID, e.Time); ok && known.image != "" &&
+			!sameImage(known.image, e.Image) {
+			g.procs.end(e.PID, e.Time)
+			g.procs.begin(e.PID, occupant{image: e.Image, start: e.Time})
 		}
 	}
 
 	switch e.Kind {
 	case event.KindProcStart:
+		// Parent linking resolves at the CHILD's start time: the parent must
+		// have been alive to spawn it, and a PPID that has since been recycled
+		// would otherwise attach this process to an unrelated one.
 		if e.PPID != 0 {
-			if parent, ok := g.procNode[e.PPID]; ok {
-				_ = g.p.AddCausal(parent, ev.ID)
+			if parent, ok := g.procs.at(e.PPID, e.Time); ok && parent.node != "" {
+				_ = g.p.AddCausal(parent.node, ev.ID)
 			}
 		}
-		g.procNode[e.PID] = ev.ID
-		if e.Image != "" {
-			g.procImage[e.PID] = e.Image
-		}
+		g.procs.begin(e.PID, occupant{
+			key: e.StartKey, image: e.Image, node: ev.ID, start: e.Time,
+		})
 	case event.KindProcExit:
-		delete(g.procNode, e.PID)
-		delete(g.procImage, e.PID)
+		g.procs.end(e.PID, e.Time)
 	case event.KindDNSQuery:
-		if proc, ok := g.procNode[e.PID]; ok {
-			_ = g.p.AddCausal(proc, ev.ID)
+		if proc, ok := g.procs.at(e.PID, e.Time); ok && proc.node != "" {
+			_ = g.p.AddCausal(proc.node, ev.ID)
 		}
 		for _, ip := range e.Answers {
 			g.dnsByIP[ip] = dnsRecord{name: e.QueryName, node: ev.ID}
 		}
 	case event.KindNetConnect:
-		if proc, ok := g.procNode[e.PID]; ok {
-			_ = g.p.AddCausal(proc, ev.ID)
+		if proc, ok := g.procs.at(e.PID, e.Time); ok && proc.node != "" {
+			_ = g.p.AddCausal(proc.node, ev.ID)
 		}
 		if rec, ok := g.dnsByIP[e.RemoteIP]; ok {
 			g.connDomain[ev.ID] = rec.name
@@ -145,30 +155,9 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 			}
 		}
 	default:
-		if proc, ok := g.procNode[e.PID]; ok {
-			_ = g.p.AddCausal(proc, ev.ID)
+		if proc, ok := g.procs.at(e.PID, e.Time); ok && proc.node != "" {
+			_ = g.p.AddCausal(proc.node, ev.ID)
 		}
 	}
 	return ev.ID
-}
-
-// sameImage compares two image paths for the purpose of spotting PID reuse.
-//
-// Deliberately forgiving: the two sources of an image (an ETW ProcStart and a
-// later lookup) can differ in case and in how the volume is written — a device
-// path such as \Device\HarddiskVolume3\... versus C:\... — and treating
-// those as different processes would throw away good causal links constantly.
-// Only a genuinely different executable counts.
-func sameImage(a, b string) bool {
-	if strings.EqualFold(a, b) {
-		return true
-	}
-	return strings.EqualFold(baseName(a), baseName(b))
-}
-
-func baseName(p string) string {
-	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	gr "github.com/ShaneDolphin/gorapide"
 )
@@ -49,14 +50,23 @@ var shells = map[string]bool{
 	"userinit.exe": true, "taskmgr.exe": true,
 }
 
-// ContextFor builds the causal context for a process.
-func (g *Graph) ContextFor(pid uint32) Context {
+// ContextFor builds the causal context for the process currently holding a PID.
+func (g *Graph) ContextFor(pid uint32) Context { return g.ContextAt(pid, time.Time{}) }
+
+// ContextAt builds the causal context for whichever process held the PID at the
+// given instant.
+//
+// The instant matters. A PID is only unique among live processes, so asking
+// "what was this PID doing?" without saying when can blend the histories of
+// unrelated programs that happened to share the number.
+func (g *Graph) ContextAt(pid uint32, when time.Time) Context {
 	var ctx Context
 
-	node, ok := g.procNode[pid]
-	if !ok {
+	occ, ok := g.procs.at(pid, when)
+	if !ok || occ.node == "" {
 		return ctx
 	}
+	node := occ.node
 
 	// Walk the ancestry through ProcStart events only: the chain of programs
 	// that led to this one running.
