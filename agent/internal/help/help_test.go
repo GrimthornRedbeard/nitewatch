@@ -1,6 +1,7 @@
 package help
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -60,5 +61,64 @@ func TestTitleComesFromTheHeading(t *testing.T) {
 	}
 	if got := titleOf("no heading here", "fallback"); got != "fallback" {
 		t.Errorf("titleOf without a heading = %q, want the fallback", got)
+	}
+}
+
+// Anything these documents point at has to be reachable by somebody holding
+// only the executable.
+//
+// A guard against a specific repeated mistake, not a style rule. The documents
+// were written inside the repository, where "see docs/feed-licensing.md" reads
+// as helpful; to the person they are FOR it is a dead end — they have an exe
+// and no repository, and the repository is private, so finding it would not
+// help either. A pointer the reader cannot follow is worse than no pointer,
+// because it implies the real answer is being withheld.
+//
+// The same drift left the disclaimer saying the known bugs are "listed under
+// Limits in the header" after that button had been renamed to About. Signposts
+// rot silently, because nothing compiles them.
+func TestDocsDoNotPointAtThingsAUserCannotOpen(t *testing.T) {
+	// Backticked spans only: prose naming a concept is fine, but a path in code
+	// formatting reads as something to go and open.
+	code := regexp.MustCompile("`([^`]+)`")
+	unreachable := []struct {
+		what  string
+		match func(string) bool
+	}{
+		{"a repository path", func(s string) bool {
+			return strings.Contains(s, "docs/") || strings.Contains(s, "internal/")
+		}},
+		{"a source or plan file", func(s string) bool {
+			for _, ext := range []string{".md", ".go", ".jsonl", ".yaml", ".yml"} {
+				if strings.HasSuffix(s, ext) {
+					return true
+				}
+			}
+			return false
+		}},
+		{"a Go test name", regexp.MustCompile(`^Test[A-Z]`).MatchString},
+	}
+
+	for _, d := range Docs() {
+		for _, m := range code.FindAllStringSubmatch(d.Markdown, -1) {
+			span := strings.TrimSpace(m[1])
+			for _, u := range unreachable {
+				if u.match(span) {
+					t.Errorf("%s references %s: %q\n"+
+						"Somebody running the exe cannot open that. State what it says "+
+						"inline, or point at threattape@gmail.com instead.", d.ID, u.what, span)
+				}
+			}
+		}
+	}
+}
+
+// Both documents have to leave a way back to a human. They are the two a person
+// reads when something has gone wrong in a pre-release tool.
+func TestDocsCarryTheContactAddress(t *testing.T) {
+	for _, d := range Docs() {
+		if !strings.Contains(d.Markdown, "threattape@gmail.com") {
+			t.Errorf("%s: no contact address, so a reader with a problem has nowhere to go", d.ID)
+		}
 	}
 }

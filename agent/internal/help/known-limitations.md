@@ -118,8 +118,12 @@ specifically.
   cannot reliably attribute DNS lookups to a process — which is the headline
   feature — and has no code-signing equivalent, so the publisher allowlist that
   keeps the noise down has nothing to stand on; macOS needs an Apple
-  entitlement that cannot be relied on. Full reasoning and the reopen triggers
-  are in `docs/plans/2026-07-27-cross-platform-assessment.md`.
+  entitlement that cannot be relied on. It would only be reconsidered if two
+  things became true together: the Windows version ships signed and installable
+  with a measured, acceptable false-positive rate — so the reason for waiting is
+  gone — *and* the market case changes, meaning somebody specific asks for a
+  platform, or the Linux per-process DNS gap is closed by something that does
+  not exist today.
 
 ---
 
@@ -136,8 +140,9 @@ specifically.
   on a timer, or as part of a page load — only on a click, and the button states
   what it will do before it is pressed. Results are cached for an hour so
   repeated clicks do not repeat the disclosure. The endpoint is POST-only and
-  guarded like a state change, so a link or an image cannot trigger it.
-  Verified by `TestNoRouteQueriesTheRegistryOnItsOwn`.
+  guarded like a state change, so a link or an image cannot trigger it. A test
+  enumerates every route in the product and fails the build if any of them
+  reaches a registry without a press, so this cannot quietly stop being true.
 - **The VirusTotal check is a second per-file query, and the user makes it.**
   Off unless the user supplies their own API key, so the account doing the
   asking is theirs. It sends one SHA-256 — no file, no filename, no path,
@@ -174,9 +179,21 @@ specifically.
   like malware to heuristics. Code signing is unresolved.
 - **No installer, no service, no auto-update.** It runs as a console
   application started by hand.
-- **Feed licensing is not settled.** See `docs/feed-licensing.md`; several
-  high-quality sources are unusable commercially without written permission,
-  and caching feed data on customer machines is redistribution rather than use.
+- **Feed licensing is not settled.** Several high-quality sources are unusable
+  commercially without written permission, and caching feed data on customer
+  machines is redistribution rather than use.
 - **Never validated over a long real-world session.** The false-positive rate
   during ordinary use is unmeasured, and it is the number that decides whether
   the tuning is right.
+
+---
+
+## Something missing from this list?
+
+This document is only as good as what is known. If NiteWatch did something not
+described here — screamed about a program that was minding its own business,
+stayed silent through something it should have caught, or simply fell over —
+that is a gap in this page as much as in the code.
+
+**threattape@gmail.com.** What it said, and what the computer was actually
+doing at the time. That second part is the one that makes a report fixable.

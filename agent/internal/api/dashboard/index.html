@@ -1166,7 +1166,14 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) =>
         /^https?:\/\//.test(href)
           ? `<a href="${esc2(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
-          : label);
+          : label)
+      // Bare addresses become mail links. Both documents end by asking the
+      // reader to get in touch, and an address you have to select and copy out
+      // of a modal is an address most people will not use. Applied last: by
+      // this point no address can be sitting inside an attribute, because the
+      // link rule above drops any non-http target rather than emitting it.
+      .replace(/([\w.+-]+@[\w-]+\.[\w.-]*[\w])/g,
+        (addr) => `<a href="mailto:${addr}">${addr}</a>`);
 
     // Markdown joins consecutive non-blank lines into ONE block. Emitting an
     // element per source line looked equivalent until a **bold run** wrapped
