@@ -7,6 +7,7 @@ package graph
 import (
 	gr "github.com/ShaneDolphin/gorapide"
 	"github.com/threattape/nitewatch/agent/internal/event"
+	"strings"
 )
 
 type Graph struct {
@@ -84,6 +85,32 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 	})
 	_ = g.p.AddEvent(ev)
 
+	// Before attributing anything, check the PID still means what we think.
+	//
+	// Windows recycles PIDs aggressively, and Chromium-based applications churn
+	// through short-lived children faster than anything else on a desktop. When
+	// a process exits without its exit event being seen — or starts without its
+	// start event being seen — the next occupant of that PID inherits the
+	// previous one's node, and every file and connection it produces is chained
+	// onto a stranger's history.
+	//
+	// That is not theoretical: a live machine produced "brave.exe wrote files in
+	// AppData\Roaming\Claude" and "claude.exe wrote files in
+	// BraveSoftware\Brave-Browser", which is what this looks like from the
+	// outside. Both programs are Electron, both spawn many children, and both
+	// were blamed for the other's work.
+	//
+	// An event that carries its own image is proof of the current occupant, so
+	// a disagreement is proof of reuse. Drop the stale mapping rather than
+	// chain onto it: losing the causal link is a gap, attributing it to the
+	// wrong program is a false statement.
+	if e.Kind != event.KindProcStart && e.Image != "" {
+		if known, ok := g.procImage[e.PID]; ok && !sameImage(known, e.Image) {
+			delete(g.procNode, e.PID)
+			delete(g.procImage, e.PID)
+		}
+	}
+
 	switch e.Kind {
 	case event.KindProcStart:
 		if e.PPID != 0 {
@@ -123,4 +150,25 @@ func (g *Graph) Ingest(e event.NormalizedEvent) gr.EventID {
 		}
 	}
 	return ev.ID
+}
+
+// sameImage compares two image paths for the purpose of spotting PID reuse.
+//
+// Deliberately forgiving: the two sources of an image (an ETW ProcStart and a
+// later lookup) can differ in case and in how the volume is written — a device
+// path such as \Device\HarddiskVolume3\... versus C:\... — and treating
+// those as different processes would throw away good causal links constantly.
+// Only a genuinely different executable counts.
+func sameImage(a, b string) bool {
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	return strings.EqualFold(baseName(a), baseName(b))
+}
+
+func baseName(p string) string {
+	if i := strings.LastIndexAny(p, `\/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }

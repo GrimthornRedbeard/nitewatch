@@ -117,3 +117,45 @@ func TestUnsignedProgramOutsideTheStoreStillFires(t *testing.T) {
 		t.Error("an unsigned program in Temp must still fire")
 	}
 }
+
+// "System is reading your saved Edge passwords", with buttons offering to stop
+// and quarantine it. PID 4 is the Windows kernel: ETW attributes cache-manager
+// writeback of memory-mapped pages to it, so a browser dirtying a page and
+// Windows flushing it later reads as the kernel touching the file.
+func TestKernelIsNotAProgram(t *testing.T) {
+	for _, name := range []string{"System", "system", " System ", "Registry", "Memory Compression", ""} {
+		if !SystemProcess(name) {
+			t.Errorf("%q should be recognised as the kernel, not a program", name)
+		}
+		if ActionableImage(name) {
+			t.Errorf("%q must never be offered as something to stop or quarantine", name)
+		}
+	}
+	for _, path := range []string{
+		`C:\Program Files\BraveSoftware\brave.exe`,
+		`C:\Users\k\AppData\Local\Temp\sync-helper.exe`,
+	} {
+		if SystemProcess(path) {
+			t.Errorf("%s is a real program", path)
+		}
+		if !ActionableImage(path) {
+			t.Errorf("%s should be actionable", path)
+		}
+	}
+	// A bare name with no directory is not something a remediation can act on.
+	if ActionableImage("svchost.exe") {
+		t.Error("a bare executable name is not a path and cannot be quarantined")
+	}
+}
+
+// The credential rule must not fire for the kernel at all.
+func TestKernelDoesNotTripCredentialTheft(t *testing.T) {
+	e := New(loadEveryPack(t), nil)
+	dets := e.EvaluateFile(FileSubject{
+		PID: 4, Image: "System",
+		Path: `C:\Users\k\AppData\Local\Microsoft\Edge\User Data\Default\Login Data`,
+	})
+	if d := find(dets, "credential-theft"); d != nil {
+		t.Errorf("the kernel tripped credential-theft:\n%s", d.Rule.RenderNarrative(d.Fields))
+	}
+}

@@ -107,3 +107,67 @@ func TestContextForUnknownProcessIsEmpty(t *testing.T) {
 		t.Fatalf("unknown process should yield empty context, got %+v", ctx)
 	}
 }
+
+// Reported from a live machine: three programs blamed for one file operation,
+// and two of them credited with writing into each other's directories —
+// "brave.exe wrote files in AppData\Roaming\Claude" alongside "claude.exe
+// wrote files in BraveSoftware\Brave-Browser".
+//
+// Both are Electron applications that spawn many short-lived children, so PIDs
+// recycle fast. When a start or exit event is missed, the next occupant of a
+// PID inherits the previous one's causal node and its activity is chained onto
+// a stranger's history.
+func TestPIDReuseDoesNotAttributeWorkToTheWrongProgram(t *testing.T) {
+	g := New()
+	const pid = 7788
+
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: pid,
+		Image: `C:\Program Files\BraveSoftware\brave.exe`})
+	g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindFileWrite, PID: pid,
+		Image: `C:\Program Files\BraveSoftware\brave.exe`,
+		Path:  `C:\Users\k\AppData\Local\BraveSoftware\cache\a.bin`})
+
+	// The PID is now reused by a different program, and its exit was missed —
+	// so no ProcExit and no ProcStart arrive. The only clue is the image on the
+	// event itself.
+	g.Ingest(event.NormalizedEvent{Seq: 3, Kind: event.KindFileWrite, PID: pid,
+		Image: `C:\Program Files\WindowsApps\Claude\claude.exe`,
+		Path:  `C:\Users\k\AppData\Roaming\Claude\Network\x.bin`})
+
+	braveCtx := g.ContextFor(pid)
+	for _, a := range braveCtx.Recent {
+		if strings.Contains(a.Detail, `Roaming\Claude`) {
+			t.Errorf("Claude's file write was attributed to Brave: %+v", a)
+		}
+	}
+}
+
+// The guard must not fire on the same program described two ways. ETW and a
+// later lookup disagree about case and about how the volume is written, and
+// treating those as different processes would discard good causal links.
+func TestSameProgramWrittenDifferentlyIsNotTreatedAsReuse(t *testing.T) {
+	g := New()
+	const pid = 4242
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: pid,
+		Image: `C:\Program Files\BraveSoftware\brave.exe`})
+	g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindFileWrite, PID: pid,
+		Image: `c:\program files\bravesoftware\BRAVE.EXE`,
+		Path:  `C:\Users\k\Documents\a.txt`})
+	g.Ingest(event.NormalizedEvent{Seq: 3, Kind: event.KindFileWrite, PID: pid,
+		Image: `\Device\HarddiskVolume3\Program Files\BraveSoftware\brave.exe`,
+		Path:  `C:\Users\k\Documents\b.txt`})
+
+	ctx := g.ContextFor(pid)
+	if len(ctx.Lineage) == 0 {
+		t.Fatal("the process node was dropped — case and volume differences were treated as reuse")
+	}
+	var writes int
+	for _, a := range ctx.Recent {
+		if a.Kind == "FileWrite" {
+			writes += a.Count
+		}
+	}
+	if writes < 2 {
+		t.Errorf("expected both writes attributed to Brave, got %d", writes)
+	}
+}

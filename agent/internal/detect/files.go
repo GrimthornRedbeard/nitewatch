@@ -116,6 +116,12 @@ func detectCredentialTheft(s FileSubject) map[string]any {
 	if what == "" {
 		return nil
 	}
+	// The kernel is not an information stealer. File I/O lands in the System
+	// process whenever the cache manager flushes a mapped page, which is
+	// routine for a database the owning browser has open.
+	if SystemProcess(s.Image) {
+		return nil
+	}
 	reader := strings.ToLower(shortName(s.Image))
 	if owner != "" && reader == strings.ToLower(owner) {
 		return nil

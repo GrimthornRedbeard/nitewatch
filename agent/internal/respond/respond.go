@@ -14,6 +14,7 @@ package respond
 
 import (
 	"fmt"
+	"github.com/threattape/nitewatch/agent/internal/detect"
 	"net"
 	"sort"
 	"strconv"
@@ -78,6 +79,13 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 	// because that acts on the destination rather than the program.
 	if image == "" {
 		proc = ""
+	}
+	// "Stop System now (cannot be undone)" was being offered for the Windows
+	// kernel, alongside "Quarantine this program" for a thing that is not a
+	// file. Terminating PID 4 stops the computer; there is nothing to
+	// quarantine. Anything without a real path gets no program actions.
+	if !detect.ActionableImage(image) {
+		image, proc = "", ""
 	}
 	pid := str(ev, "PID")
 	ip := str(ev, "RemoteIP")

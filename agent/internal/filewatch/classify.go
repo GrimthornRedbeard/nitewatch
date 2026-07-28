@@ -157,9 +157,35 @@ func Classify(path string) Category {
 
 // CredentialInfo reports what secret a path holds and which program legitimately
 // reads it.
+// sqliteSidecar reports whether a path is one of SQLite's transient companion
+// files rather than a database.
+//
+// These matched because the rules use substring tests and
+// "Login Data-journal" contains "login data". Describing a touch of a rollback
+// journal as "reading your saved passwords" is wrong on its own terms: a
+// journal exists during a WRITE, is created and deleted constantly by the
+// owning application, and gets flushed to disk by the operating system's cache
+// manager rather than by whoever dirtied the page.
+//
+// A journal can technically hold password bytes mid-transaction, so this is a
+// deliberate trade: the realistic cause of a non-owner touching one is
+// attribution noise, and three critical alerts for a single flush is a far
+// worse outcome than missing an exotic theft technique.
+func sqliteSidecar(lowerPath string) bool {
+	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
+		if strings.HasSuffix(lowerPath, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func CredentialInfo(path string) (what, owner string) {
 	p := strings.ToLower(filepath.ToSlash(path))
 	p = strings.ReplaceAll(p, "/", `\`)
+	if sqliteSidecar(p) {
+		return "", ""
+	}
 	for _, c := range credentialPaths {
 		if c.What == "" {
 			continue // placeholder exclusions

@@ -74,9 +74,24 @@ specifically.
 
 ### Structural gaps
 
-- **Process attribution keys on PID.** Windows recycles PIDs. The cache is
-  cleared on process exit, but a missed exit event can still misattribute a
-  connection. Sysmon's ProcessGuid would fix this properly.
+- **Process attribution keys on PID, and this has been seen to go wrong.**
+  Windows recycles PIDs, and Chromium-based applications churn through
+  short-lived children faster than anything else on a desktop. A live machine
+  produced three CRITICAL alerts for one file operation — "System", "brave.exe"
+  and "claude.exe" each blamed for reading the same password store — along with
+  each browser credited with writing into the other's profile directory.
+
+  Two of the three causes are now fixed: the kernel is excluded, and SQLite
+  journal files are no longer treated as the database. The third is mitigated
+  rather than solved — when an event carries an image that disagrees with the
+  one recorded for its PID, that is proof of reuse and the stale mapping is
+  dropped, so activity is not chained onto a stranger's history. Events that
+  carry no image still cannot be checked this way.
+
+  **Sysmon's ProcessGuid, or the process start time, would fix this properly.**
+  Until then, treat the acting program on a file alert as probable rather than
+  certain, and check "What led to this" — if the chain looks like it belongs to
+  a different program than the one named, it probably does.
 - **No command lines or file hashes.** Raw ETW `Kernel-Process` does not supply
   either, so no detector can key on them. This rules out a whole class of
   detection (living-off-the-land argument patterns) that Sysmon would enable.

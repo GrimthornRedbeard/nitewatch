@@ -298,3 +298,18 @@ func TestNoProgramActionsWhenTheProgramIsUnknown(t *testing.T) {
 		t.Error("blocking the address should still be offered")
 	}
 }
+
+// The System alert offered "Stop System now (cannot be undone)" and "Quarantine
+// this program". Terminating PID 4 stops the computer, and "System" is not a
+// file that can be moved anywhere.
+func TestNoActionsAgainstTheKernel(t *testing.T) {
+	acts := Suggest("credentials", "critical", map[string]any{
+		"ImagePath": "System", "ProcessName": "System", "PID": float64(4),
+	})
+	for _, a := range acts {
+		switch a.Kind {
+		case KillProcess, QuarantineFile:
+			t.Errorf("offered %v against the Windows kernel: %q", a.Kind, a.Label)
+		}
+	}
+}

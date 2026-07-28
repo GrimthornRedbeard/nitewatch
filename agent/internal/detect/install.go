@@ -121,3 +121,32 @@ func StorePackage(image string) (name, version, publisherID string, ok bool) {
 	}
 	return name, version, publisherID, name != ""
 }
+
+// SystemProcess reports whether an image refers to the Windows kernel rather
+// than to a program somebody installed.
+//
+// PID 4 is the System process, and ETW attributes a great deal of file I/O to
+// it that no program asked for: the cache manager writing back memory-mapped
+// pages, prefetch, defragmentation. That is how "System is reading your saved
+// Edge passwords" happens — Edge dirtied a page and Windows flushed it later,
+// in the kernel's context.
+//
+// It also cannot be acted on. There is no file to quarantine, and terminating
+// PID 4 stops the computer. Offering either is worse than saying nothing.
+func SystemProcess(image string) bool {
+	switch strings.ToLower(strings.TrimSpace(image)) {
+	case "system", "system idle process", "registry", "memory compression", "":
+		return true
+	}
+	return false
+}
+
+// ActionableImage reports whether an image is a real file path that a
+// remediation could act on. "System" is a name, not a path; so is a bare
+// executable name recovered without its directory.
+func ActionableImage(image string) bool {
+	if SystemProcess(image) {
+		return false
+	}
+	return strings.ContainsAny(image, `\/`)
+}

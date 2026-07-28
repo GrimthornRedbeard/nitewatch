@@ -71,3 +71,30 @@ func TestOtherBrowsersStillMatchTheirCredentialFiles(t *testing.T) {
 		t.Errorf("Chrome Bookmarks matched as %q", what)
 	}
 }
+
+// Reported from a live machine: three CRITICAL alerts within moments —
+// "System", "brave.exe" and "claude.exe" all "reading your saved Edge
+// passwords". Two of them named Login Data-journal.
+//
+// A rollback journal is not the password database. It exists only during a
+// WRITE, the owning browser creates and deletes it constantly, and the
+// operating system's cache manager flushes it in the kernel's context rather
+// than the writer's — which is how three different programs get blamed for one
+// flush.
+func TestSQLiteSidecarsAreNotCredentialStores(t *testing.T) {
+	const edge = `C:\Users\k\AppData\Local\Microsoft\Edge\User Data\Default\`
+	for _, f := range []string{
+		"Login Data-journal", "Login Data-wal", "Login Data-shm",
+		"Login Data For Account-journal",
+	} {
+		if what, _ := CredentialInfo(edge + f); what != "" {
+			t.Errorf("%s should not be treated as the password store, got %q", f, what)
+		}
+	}
+	// The databases themselves still are.
+	for _, f := range []string{"Login Data", "Login Data For Account"} {
+		if what, _ := CredentialInfo(edge + f); what == "" {
+			t.Errorf("%s should still be recognised", f)
+		}
+	}
+}
