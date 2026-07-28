@@ -1163,6 +1163,11 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     const inline = (t) => esc2(t)
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      // Single-asterisk emphasis, applied AFTER bold so ** is already gone and
+      // cannot be mistaken for two italic markers. Both shipped documents use
+      // it — "what *caused* what", "*which program* made the lookup" — and
+      // without this the reader sees the asterisks instead of the stress.
+      .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) =>
         /^https?:\/\//.test(href)
           ? `<a href="${esc2(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
@@ -2340,7 +2345,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     const note = document.createElement("span");
     note.className = "ext";
     note.textContent = "This is the only button here that leaves your computer. " +
-      "It asks the public registry (rdap.org) who owns " + target + ", which tells " +
+      // target is {name, ip}; interpolating the object rendered the disclosure
+      // as "who owns [object Object]". The one sentence that tells a user
+      // exactly what is about to leave their machine has to name the thing.
+      "It asks the public registry (rdap.org) who owns " + target.name + ", which tells " +
       "them you are looking it up. Nothing about your machine, your programs or " +
       "your other traffic is sent — only that one address.";
     const out = document.createElement("div");
