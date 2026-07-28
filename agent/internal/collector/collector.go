@@ -94,6 +94,10 @@ type Collector struct {
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
 	firstContact bool
+
+	// ledgerWriteFailed keeps a broken ledger from reporting itself once per
+	// connection. The first failure is the informative one.
+	ledgerWriteFailed bool
 }
 
 // New builds a collector with default options (skip local traffic, resolve names).
@@ -336,7 +340,17 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		BytesSent:  e.BytesSent,
 		BytesRecv:  e.BytesRecv,
 	}
-	_ = c.ledger.RecordConnectionDedup(conn, c.dedupWindow())
+	// Not discarded. A ledger write is the whole product — a connection that
+	// fails to record is one the user will never see, and silence is how a
+	// malformed INSERT survived long enough to drop the byte counts on every
+	// flow's first sighting. Logged once per run so a persistent failure
+	// (a full disk, a locked database) is visible without filling the log
+	// at connection rate.
+	if err := c.ledger.RecordConnectionDedup(conn, c.dedupWindow()); err != nil && !c.ledgerWriteFailed {
+		c.ledgerWriteFailed = true
+		log.Printf("ledger: recording connections is FAILING (%v) — "+
+			"the connection list will be incomplete until this is fixed", err)
+	}
 
 	if c.opts.Detect != nil && !selfEvent {
 		c.runDetections(e, conn, info, domain)

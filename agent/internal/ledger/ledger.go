@@ -195,9 +195,15 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 		}
 	}
 
+	// bytes_sent/bytes_recv belong in this list. They were missing, and the
+	// driver accepted the two surplus arguments rather than rejecting the
+	// statement, so every flow's FIRST sighting recorded zero bytes. Only
+	// repeat sightings had a volume, because the UPDATE branch above adds to
+	// the column correctly — which made the bug look like "quiet connections
+	// show nothing" instead of what it was.
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country, story)
-		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country, story, bytes_sent, bytes_recv)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
 		c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story),

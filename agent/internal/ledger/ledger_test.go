@@ -340,3 +340,63 @@ func TestUnattributedConnectionsStillKeyOnPID(t *testing.T) {
 		t.Fatalf("unattributed traffic from different processes must not merge, got %d", len(rows))
 	}
 }
+
+// A flow seen exactly once must still record how much moved.
+//
+// It did not. bytes_sent/bytes_recv were absent from the INSERT column list
+// while still being passed as arguments, and the driver accepted the surplus
+// rather than rejecting the statement — so the first sighting of every flow
+// stored zero. The UPDATE branch adds to the columns correctly, which is what
+// hid it: anything contacted repeatedly looked right, and the failure showed
+// up only as "quiet connections report no volume".
+//
+// Volume is the one thing about an encrypted conversation that is always
+// visible, and it is what separates a heartbeat from an upload of your
+// documents. A one-shot exfiltration is precisely the case that must not
+// read as zero.
+func TestFirstSightingRecordsItsBytes(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const sent, recv = 41_943_040, 12_288
+	now := time.Now()
+	if err := db.RecordConnectionDedup(Connection{
+		Time: now, PID: 7180, Image: `C:\Temp\sync-helper.exe`,
+		RemoteIP: "45.137.22.184", RemotePort: 8443, Proto: "TCP",
+		BytesSent: sent, BytesRecv: recv,
+	}, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.RecentConnections(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0].BytesSent != sent || rows[0].BytesRecv != recv {
+		t.Errorf("first sighting recorded %d/%d bytes, want %d/%d",
+			rows[0].BytesSent, rows[0].BytesRecv, sent, recv)
+	}
+
+	// And a second sighting inside the window adds to it rather than replacing.
+	if err := db.RecordConnectionDedup(Connection{
+		Time: now.Add(time.Second), PID: 7180, Image: `C:\Temp\sync-helper.exe`,
+		RemoteIP: "45.137.22.184", RemotePort: 8443, Proto: "TCP",
+		BytesSent: 1_000, BytesRecv: 2_000,
+	}, 5*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = db.RecentConnections(10)
+	if len(rows) != 1 {
+		t.Fatalf("dedup created a second row: %d rows", len(rows))
+	}
+	if rows[0].BytesSent != sent+1_000 || rows[0].BytesRecv != recv+2_000 {
+		t.Errorf("after dedup: %d/%d, want %d/%d",
+			rows[0].BytesSent, rows[0].BytesRecv, sent+1_000, recv+2_000)
+	}
+}
