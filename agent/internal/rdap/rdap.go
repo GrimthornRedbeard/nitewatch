@@ -16,6 +16,7 @@ package rdap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,6 +32,13 @@ import (
 type Registration struct {
 	Query string `json:"query"`
 	Kind  string `json:"kind"` // "ip" or "domain"
+	// Queried is what was actually sent to the registry, which is frequently
+	// not the string the user clicked: registries hold records for registered
+	// domains, not for every hostname under them. Reported so the answer is
+	// never silently about something else.
+	Queried string `json:"queried,omitempty"`
+	// Substituted explains the difference in plain English when there is one.
+	Substituted string `json:"substituted,omitempty"`
 
 	// Network/registry facts.
 	Name    string `json:"name,omitempty"`    // network or domain name
@@ -63,6 +71,14 @@ type Registration struct {
 	Note string `json:"note,omitempty"`
 }
 
+// ErrNoRecord means the registry answered and said it holds nothing for this
+// name. Distinct from every other failure, and the distinction matters: "there
+// is no such registration" is an answer worth acting on, whereas a timeout or a
+// rate limit means we simply did not get one. Falling back to a different
+// lookup on the second kind would present an answer about something else as if
+// it were the answer to the question asked.
+var ErrNoRecord = errors.New("no registration record")
+
 // Client performs lookups, caching results so repeated clicks on the same
 // destination do not repeatedly announce the user's interest to a registry.
 type Client struct {
@@ -89,6 +105,129 @@ func New() *Client {
 		http:    &http.Client{Timeout: 12 * time.Second},
 		BaseURL: "https://rdap.org",
 	}
+}
+
+// LookupBest answers the question the user meant, which is not always the
+// string they clicked.
+//
+// Two things go wrong with asking a registry about a raw hostname:
+//
+//  1. Registries hold records for REGISTERED DOMAINS. There is no record for
+//     "39.224.186.35.bc.googleusercontent.com" because nobody registered that —
+//     they registered googleusercontent.com. Asking for the full hostname
+//     returns "no registration record found", which reads as a dead end when
+//     the answer was one label away.
+//  2. Many hostnames are generated from the address itself, by the hosting
+//     provider, for reverse DNS. Their registered domain belongs to the
+//     provider and says nothing specific; the ADDRESS record is the one that
+//     names who holds that particular block.
+//
+// So: a name that encodes its own address is looked up by address. Any other
+// hostname is reduced to its registered domain. Either way the result records
+// what was actually asked, so nothing is silently answered about something else.
+func (c *Client) LookupBest(ctx context.Context, host, ip string) (Registration, error) {
+	host = strings.TrimSpace(host)
+	ip = strings.TrimSpace(ip)
+
+	if host == "" || net.ParseIP(host) != nil {
+		return c.Lookup(ctx, firstNonEmpty(host, ip))
+	}
+
+	if ip != "" && looksGeneratedFrom(host, ip) {
+		reg, err := c.Lookup(ctx, ip)
+		if err == nil {
+			reg.Query = host
+			reg.Substituted = "That name is generated automatically from the address by " +
+				"the hosting provider, so it has no registration of its own. This is the " +
+				"record for the address itself."
+		}
+		return reg, err
+	}
+
+	base := RegistrableDomain(host)
+	reg, err := c.Lookup(ctx, base)
+	if err == nil {
+		reg.Query = host
+		if base != host {
+			reg.Substituted = "Registries hold records for registered domains, not for " +
+				"every name beneath them, so this is the record for " + base + "."
+		}
+		return reg, nil
+	}
+	// Fall back ONLY when the registry positively said it has no such record.
+	// Any other failure — a timeout, a rate limit, a bad gateway — means we did
+	// not get an answer, and quietly returning the address record instead would
+	// present an answer about something else as though it were this one.
+	if errors.Is(err, ErrNoRecord) && ip != "" {
+		if byIP, ipErr := c.Lookup(ctx, ip); ipErr == nil {
+			byIP.Query = host
+			byIP.Substituted = "No registration exists for " + base +
+				", so this is the record for the address it resolved to."
+			return byIP, nil
+		}
+	}
+	return reg, err
+}
+
+// looksGeneratedFrom reports whether a hostname was built out of the address —
+// "39.224.186.35.bc.googleusercontent.com", "162-254-199-165.valve.net",
+// "ec2-3-91-2-7.compute-1.amazonaws.com". Such names carry no registration of
+// their own and tell you only who the host is, which the address record says
+// better.
+func looksGeneratedFrom(host, ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	low := strings.ToLower(host)
+	if v4 := parsed.To4(); v4 != nil {
+		// Split on BOTH separators and compare whole tokens. An octet is
+		// commonly bounded by a dash on one side and a dot on the other
+		// ("162-254-199-165.valve.net"), so testing one separator at a time
+		// misses the real cases; and matching as a substring would let "1"
+		// match inside "10".
+		tokens := map[string]bool{}
+		for _, f := range strings.FieldsFunc(low, func(r rune) bool {
+			return r == '.' || r == '-'
+		}) {
+			tokens[f] = true
+		}
+		for _, o := range strings.Split(v4.String(), ".") {
+			if !tokens[o] {
+				return false
+			}
+		}
+		return true
+	}
+	// IPv6 reverse names are unmistakable.
+	return strings.Contains(low, ".ip6.arpa") || strings.Contains(low, "ipv6")
+}
+
+// RegistrableDomain reduces a hostname to the name somebody actually
+// registered: "a.b.example.co.uk" -> "example.co.uk".
+//
+// Heuristic rather than a full public-suffix list, and deliberately so: the
+// list is 15,000 entries that go stale, and a wrong answer here costs one
+// unhelpful lookup rather than a wrong verdict about anything.
+func RegistrableDomain(host string) string {
+	h := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	parts := strings.Split(h, ".")
+	if len(parts) <= 2 {
+		return h
+	}
+	// A two-part public suffix ("co.uk", "com.au") keeps three labels.
+	last, penult := parts[len(parts)-1], parts[len(parts)-2]
+	if len(last) <= 3 && len(penult) <= 3 && len(parts) >= 3 {
+		return strings.Join(parts[len(parts)-3:], ".")
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // Lookup resolves an address or domain. The caller is responsible for ensuring
@@ -124,7 +263,13 @@ func (c *Client) Lookup(ctx context.Context, query string) (Registration, error)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return Registration{}, fmt.Errorf("no registration record found for %s", query)
+		return Registration{}, fmt.Errorf("%w found for %s", ErrNoRecord, query)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		// Worth its own message: the fallback below doubles the request rate,
+		// and rdap.org throttles. Saying "wait a moment" is far more useful
+		// than a bare status code.
+		return Registration{}, fmt.Errorf("the registry is rate-limiting lookups just now — wait a few seconds and try again")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return Registration{}, fmt.Errorf("registry returned %s", resp.Status)
@@ -138,6 +283,7 @@ func (c *Client) Lookup(ctx context.Context, query string) (Registration, error)
 	}
 
 	reg := raw.normalise(query, kind)
+	reg.Queried = query
 	c.mu.Lock()
 	c.cache[query] = cached{reg: reg, at: time.Now()}
 	c.mu.Unlock()

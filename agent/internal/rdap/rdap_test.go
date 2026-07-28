@@ -216,3 +216,155 @@ func TestAdminContactIsNotShownAsTheOwner(t *testing.T) {
 		t.Errorf("contact = %q, want the admin contact kept separately", reg.Contact)
 	}
 }
+
+// Reported from a live machine: clicking "who owns this?" on
+// 39.224.186.35.bc.googleusercontent.com answered "no registration record
+// found". Correct, and useless — nobody registered that hostname. Google
+// registered googleusercontent.com, and the name itself is generated from the
+// address, so the address record is the one that answers the question.
+func TestGeneratedHostnameIsLookedUpByAddress(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		if strings.HasPrefix(r.URL.Path, "/domain/") {
+			w.WriteHeader(http.StatusNotFound) // no record for the hostname
+			return
+		}
+		_, _ = w.Write([]byte(ipJSON))
+	}))
+	defer srv.Close()
+	c := New()
+	c.BaseURL = srv.URL
+
+	reg, err := c.LookupBest(context.Background(),
+		"39.224.186.35.bc.googleusercontent.com", "39.224.186.35")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || !strings.HasPrefix(asked[0], "/ip/") {
+		t.Errorf("should have asked about the address directly, asked: %v", asked)
+	}
+	if reg.Query != "39.224.186.35.bc.googleusercontent.com" {
+		t.Errorf("should report what the user clicked, got %q", reg.Query)
+	}
+	if !strings.Contains(reg.Substituted, "generated automatically") {
+		t.Errorf("should explain the substitution, got %q", reg.Substituted)
+	}
+}
+
+// An ordinary subdomain is reduced to the registered domain rather than
+// reported as missing.
+func TestSubdomainFallsBackToTheRegisteredDomain(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		_, _ = w.Write([]byte(domainJSON("2015-01-01T00:00:00Z")))
+	}))
+	defer srv.Close()
+	c := New()
+	c.BaseURL = srv.URL
+
+	reg, err := c.LookupBest(context.Background(), "media-atl3-3.cdn.whatsapp.net", "31.13.66.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0] != "/domain/whatsapp.net" {
+		t.Errorf("should have asked for whatsapp.net, asked: %v", asked)
+	}
+	if !strings.Contains(reg.Substituted, "whatsapp.net") {
+		t.Errorf("should say which domain it used, got %q", reg.Substituted)
+	}
+}
+
+func TestRegistrableDomain(t *testing.T) {
+	cases := map[string]string{
+		"39.224.186.35.bc.googleusercontent.com": "googleusercontent.com",
+		"media-atl3-3.cdn.whatsapp.net":          "whatsapp.net",
+		"example.com":                            "example.com",
+		"a.b.example.co.uk":                      "example.co.uk",
+		"api.anthropic.com":                      "anthropic.com",
+	}
+	for in, want := range cases {
+		if got := RegistrableDomain(in); got != want {
+			t.Errorf("RegistrableDomain(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLooksGeneratedFrom(t *testing.T) {
+	yes := [][2]string{
+		{"39.224.186.35.bc.googleusercontent.com", "39.224.186.35"},
+		{"162-254-199-165.valve.net", "162.254.199.165"},
+		{"ec2-3-91-2-7.compute-1.amazonaws.com", "3.91.2.7"},
+	}
+	for _, c := range yes {
+		if !looksGeneratedFrom(c[0], c[1]) {
+			t.Errorf("looksGeneratedFrom(%q, %q) = false, want true", c[0], c[1])
+		}
+	}
+	no := [][2]string{
+		{"api.anthropic.com", "160.79.104.10"},
+		{"media-atl3-3.cdn.whatsapp.net", "31.13.66.1"},
+		// A partial octet match must not count.
+		{"1.example.com", "1.2.3.4"},
+	}
+	for _, c := range no {
+		if looksGeneratedFrom(c[0], c[1]) {
+			t.Errorf("looksGeneratedFrom(%q, %q) = true, want false", c[0], c[1])
+		}
+	}
+}
+
+// A transient failure is not "no such registration". Falling back on one would
+// present the address record as though it answered the question asked about
+// the name — quietly, with no way for the reader to tell.
+func TestTransientFailureDoesNotSilentlySubstitute(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if strings.HasPrefix(r.URL.Path, "/domain/") {
+			w.WriteHeader(http.StatusTooManyRequests) // throttled, not absent
+			return
+		}
+		_, _ = w.Write([]byte(ipJSON))
+	}))
+	defer srv.Close()
+	c := New()
+	c.BaseURL = srv.URL
+
+	_, err := c.LookupBest(context.Background(), "sub.example.org", "93.184.216.34")
+	if err == nil {
+		t.Fatal("a rate-limited lookup must surface as an error, not as somebody else's record")
+	}
+	if !strings.Contains(err.Error(), "rate-limiting") {
+		t.Errorf("error should explain the rate limit, got: %v", err)
+	}
+	for _, p := range paths {
+		if strings.HasPrefix(p, "/ip/") {
+			t.Error("must not have fallen back to the address after a transient failure")
+		}
+	}
+}
+
+// A genuine 404 is an answer, and falling back to the address is the right
+// thing to do with it.
+func TestGenuineAbsenceDoesFallBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/domain/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(ipJSON))
+	}))
+	defer srv.Close()
+	c := New()
+	c.BaseURL = srv.URL
+
+	reg, err := c.LookupBest(context.Background(), "sub.example.org", "93.184.216.34")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reg.Kind != "ip" || !strings.Contains(reg.Substituted, "No registration exists") {
+		t.Errorf("should have fallen back to the address with an explanation: %+v", reg)
+	}
+}

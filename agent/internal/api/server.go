@@ -430,10 +430,14 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing q", http.StatusBadRequest)
 		return
 	}
+	// The address is passed alongside the name so the client can answer the
+	// question the user meant: registries hold no record for most hostnames,
+	// and many hostnames are generated from the address anyway.
+	ip := r.URL.Query().Get("ip")
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	reg, err := s.rdap.Lookup(ctx, q)
+	reg, err := s.rdap.LookupBest(ctx, q, ip)
 	if err != nil {
 		// The message is written for a person to read, so pass it through rather
 		// than flattening it to a status code.

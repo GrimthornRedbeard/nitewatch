@@ -200,7 +200,7 @@
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px;
     box-shadow: var(--shadow); }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 940px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 0; }
   th, td { text-align: left; padding: 13px 15px; border-bottom: 1px solid var(--line-soft);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
     font-size: 15px; }
@@ -398,6 +398,12 @@
   /* A dotted underline on a defined term, only in plain mode. */
   body.plain .term { border-bottom: 2px dotted var(--dim); cursor: help; }
   body.plain .term:hover { border-bottom-color: var(--accent); color: var(--fg); }
+  .collist { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px 22px; }
+  .collist label { display: flex; align-items: center; gap: 10px; cursor: pointer;
+    font-weight: 600; font-size: 15px; padding: 6px 0; }
+  .collist label.locked { opacity: .55; cursor: default; }
+  .collist .why { border: 0; padding: 0; margin: 0; font-size: 13px; color: var(--dim); }
   .gloss { display: grid; gap: 16px; }
   .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
   .gloss dd { margin: 4px 0 0; color: var(--fg); font-size: 15px; line-height: 1.65; }
@@ -476,12 +482,26 @@
       Explain everything
     </label>
     <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
+    <button class="btn" id="cols-btn" title="Choose which columns to show">Columns</button>
     <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
     <button class="btn" id="settings-btn">Settings</button>
   </div>
 </header>
 <div class="wrap">
   <div id="banner" class="banner"></div>
+
+  <div id="columns" class="panel">
+    <h2>Columns</h2>
+    <p class="hint">Show only what you need. A narrow window cannot fit all eleven,
+      and scrolling sideways to read a table is nobody's idea of a good time.
+      Your choice is remembered on this computer.</p>
+    <div id="col-list" class="collist"></div>
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" id="col-all">Show all</button>
+      <button class="btn" id="col-essentials">Just the essentials</button>
+      <button class="btn primary" id="col-close">Done</button>
+    </div>
+  </div>
 
   <div id="settings" class="panel">
     <h2>Settings</h2>
@@ -837,6 +857,83 @@
 
   const ROW_CELLS = 11;
 
+  // Column identity, in table order. The keys match the th[data-k] attributes,
+  // so hiding is done with one generated stylesheet rather than by touching
+  // class names — which matters because the reconciler rewrites those on every
+  // paint and would undo anything set there.
+  const COLUMNS = [
+    {key: "lastSeen",  label: "Last seen",  essential: true},
+    {key: "image",     label: "Program",    essential: true, required: true},
+    {key: "domain",    label: "Destination", essential: true, required: true},
+    {key: "remoteIP",  label: "IP:Port",    essential: false},
+    {key: "asOrg",     label: "Owner",      essential: true},
+    {key: "country",   label: "Country",    essential: false},
+    {key: "proto",     label: "Type",       essential: false},
+    {key: "inbound",   label: "Direction",  essential: false},
+    {key: "bytesSent", label: "Sent",       essential: true},
+    {key: "bytesRecv", label: "Received",   essential: false},
+    {key: "events",    label: "Activity",   essential: false},
+  ];
+  const COLS_KEY = "nitewatch.columns";
+  let hiddenCols = new Set();
+
+  function applyColumns() {
+    let sheet = document.getElementById("colstyle");
+    if (!sheet) {
+      sheet = document.createElement("style");
+      sheet.id = "colstyle";
+      document.head.appendChild(sheet);
+    }
+    sheet.textContent = [...hiddenCols].map(k =>
+      `th[data-k="${k}"], td[data-col="${k}"] { display: none; }`).join("\n");
+  }
+
+  function saveColumns() {
+    try { localStorage.setItem(COLS_KEY, JSON.stringify([...hiddenCols])); }
+    catch (e) { /* private mode */ }
+  }
+
+  function loadColumns() {
+    try {
+      const raw = localStorage.getItem(COLS_KEY);
+      if (raw) hiddenCols = new Set(JSON.parse(raw));
+    } catch (e) { /* private mode */ }
+    // Program and Destination answer "who is talking to whom", which is the
+    // whole point; hiding them would leave a table that says nothing.
+    for (const c of COLUMNS) if (c.required) hiddenCols.delete(c.key);
+    applyColumns();
+  }
+
+  function paintColumnList() {
+    $("col-list").innerHTML = COLUMNS.map(c => `
+      <label class="${c.required ? "locked" : ""}">
+        <input type="checkbox" data-col-key="${c.key}"
+          ${hiddenCols.has(c.key) ? "" : "checked"} ${c.required ? "disabled" : ""}>
+        <span>${esc(c.label)}${c.required ? ` <span class="why">— always shown</span>` : ""}</span>
+      </label>`).join("");
+  }
+
+  $("cols-btn").addEventListener("click", () => {
+    paintColumnList();
+    $("columns").classList.toggle("show");
+    $("settings").classList.remove("show");
+  });
+  $("col-close").addEventListener("click", () => $("columns").classList.remove("show"));
+  $("col-list").addEventListener("change", (e) => {
+    const box = e.target.closest("[data-col-key]");
+    if (!box) return;
+    if (box.checked) hiddenCols.delete(box.dataset.colKey);
+    else hiddenCols.add(box.dataset.colKey);
+    applyColumns(); saveColumns();
+  });
+  $("col-all").addEventListener("click", () => {
+    hiddenCols.clear(); applyColumns(); saveColumns(); paintColumnList();
+  });
+  $("col-essentials").addEventListener("click", () => {
+    hiddenCols = new Set(COLUMNS.filter(c => !c.essential && !c.required).map(c => c.key));
+    applyColumns(); saveColumns(); paintColumnList();
+  });
+
   function rowCells(c) {
     const dest = c.domain || "— no name —";
     return [
@@ -858,7 +955,11 @@
 
   function newRow() {
     const tr = document.createElement("tr");
-    for (let i = 0; i < ROW_CELLS; i++) tr.appendChild(document.createElement("td"));
+    for (let i = 0; i < ROW_CELLS; i++) {
+      const td = document.createElement("td");
+      td.dataset.col = COLUMNS[i].key;
+      tr.appendChild(td);
+    }
     return tr;
   }
 
@@ -1374,7 +1475,7 @@
             return `<li><span>${esc(c.domain || c.remoteIP)}</span>` +
               `<span class="g">${esc(c.asOrg || "—")} ${esc(c.country || "")} · ` +
               `↑${esc(bytes(c.bytesSent))} ↓${esc(bytes(c.bytesRecv))}` +
-              (t ? `<button class="lk" data-lookup="${esc(t)}" title="Asks a public registry who owns ${esc(t)} — this leaves your computer">who owns this?</button>` : "") +
+              (t ? `<button class="lk" data-lookup="${esc(t.name)}" data-lookup-ip="${esc(t.ip)}" title="Asks a public registry who owns ${esc(t.name)} — this leaves your computer">who owns this?</button>` : "") +
               `</span><div class="lkres"></div></li>`;
           }).join("") +
           `</ul>` +
@@ -1405,7 +1506,7 @@
     const btn = e.target.closest("button[data-lookup]");
     if (!btn) return;
     const out = btn.closest("li").querySelector(".lkres");
-    runLookup(btn.dataset.lookup, btn, out);
+    runLookup({name: btn.dataset.lookup, ip: btn.dataset.lookupIp || ""}, btn, out);
   });
   $("proc-close").addEventListener("click", () => $("proc-modal").classList.remove("show"));
   $("proc-modal").addEventListener("click", (e) => {
@@ -1447,16 +1548,19 @@
 
   function lookupTargetFor(c) {
     // Prefer the name: a domain's registration date is the useful signal, and a
-    // name lookup reveals no more than the address lookup already would.
-    return c.domain || c.remoteIP || "";
+    // name lookup reveals no more than the address lookup already would. The
+    // address travels with it so the agent can pick whichever actually has a
+    // record — most hostnames have none of their own.
+    return { name: c.domain || c.remoteIP || "", ip: c.remoteIP || "" };
   }
 
-  function renderLookupControl(container, target) {
+  function renderLookupControl(container, t) {
     container.innerHTML = "";
-    if (!target) return;
+    const target = typeof t === "string" ? { name: t, ip: "" } : (t || { name: "" });
+    if (!target.name) return;
     const btn = document.createElement("button");
     btn.className = "btn ext-btn";
-    btn.textContent = "Look up who registered " + target;
+    btn.textContent = "Look up who registered " + target.name;
     const note = document.createElement("span");
     note.className = "ext";
     note.textContent = "This is the only button here that leaves your computer. " +
@@ -1468,17 +1572,20 @@
     btn.addEventListener("click", () => runLookup(target, btn, out));
   }
 
-  async function runLookup(target, btn, out) {
-    if (lookupCache.has(target)) { renderRegistration(out, lookupCache.get(target)); return; }
+  async function runLookup(t, btn, out) {
+    const target = typeof t === "string" ? { name: t, ip: "" } : t;
+    const key = target.name + "|" + (target.ip || "");
+    if (lookupCache.has(key)) { renderRegistration(out, lookupCache.get(key)); return; }
     btn.disabled = true;
     const label = btn.textContent;
     btn.textContent = "Asking the registry…";
     try {
-      const r = await post("/api/lookup?q=" + encodeURIComponent(target));
+      const r = await post("/api/lookup?q=" + encodeURIComponent(target.name)
+        + (target.ip ? "&ip=" + encodeURIComponent(target.ip) : ""));
       const body = await r.text();
       if (!r.ok) throw new Error(body.trim() || r.statusText);
       const reg = JSON.parse(body);
-      lookupCache.set(target, reg);
+      lookupCache.set(key, reg);
       renderRegistration(out, reg);
     } catch (e) {
       out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
@@ -1507,6 +1614,7 @@
     const noteClass = reg.ageDays >= 0 && reg.ageDays <= 180 ? "note" : "note old";
     out.innerHTML =
       `<div class="res">` +
+      (reg.substituted ? `<p class="src" style="margin:0 0 10px">${esc(reg.substituted)}</p>` : "") +
       (reg.note ? `<p class="${noteClass}">${esc(reg.note)}</p>` : "") +
       (rows.length
         ? `<dl>` + rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") + `</dl>`
@@ -1818,6 +1926,7 @@
     if (want) { await loadTerms(); setPlain(true); }
   })();
 
+  loadColumns();
   paintHeaders();
   refresh();
   setInterval(refresh, 5000);
