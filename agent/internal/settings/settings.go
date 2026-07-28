@@ -39,6 +39,15 @@ type Values struct {
 	// accepted. Storing the version rather than a boolean means editing the
 	// terms re-prompts, instead of relying on consent given to different words.
 	AcceptedTerms string `json:"acceptedTerms"`
+	// Contributor records that the user says they contribute monthly, which
+	// retires the contribution notice permanently. Taken at face value: see
+	// internal/tip for why this is not verified.
+	Contributor bool `json:"contributor"`
+	// TipSnoozedUnix is when the contribution notice was last dismissed. Stored
+	// as an instant rather than a counter so the notice is paced by elapsed
+	// time, and a user who opens the dashboard forty times in an afternoon sees
+	// it once.
+	TipSnoozedUnix int64 `json:"tipSnoozedUnix"`
 }
 
 // Defaults are the shipped configuration.
@@ -119,13 +128,15 @@ func (s *Store) persist(v Values) error {
 	}
 	defer tx.Rollback()
 	for k, val := range map[string]string{
-		"includeLocal":  b2s(v.IncludeLocal),
-		"resolveNames":  b2s(v.ResolveNames),
-		"recon":         b2s(v.Recon),
-		"dedupSeconds":  strconv.Itoa(v.DedupSeconds),
-		"retentionDays": strconv.Itoa(v.RetentionDays),
-		"virusTotalKey": strings.TrimSpace(v.VirusTotalKey),
-		"acceptedTerms": strings.TrimSpace(v.AcceptedTerms),
+		"includeLocal":   b2s(v.IncludeLocal),
+		"resolveNames":   b2s(v.ResolveNames),
+		"recon":          b2s(v.Recon),
+		"dedupSeconds":   strconv.Itoa(v.DedupSeconds),
+		"retentionDays":  strconv.Itoa(v.RetentionDays),
+		"virusTotalKey":  strings.TrimSpace(v.VirusTotalKey),
+		"acceptedTerms":  strings.TrimSpace(v.AcceptedTerms),
+		"contributor":    b2s(v.Contributor),
+		"tipSnoozedUnix": strconv.FormatInt(v.TipSnoozedUnix, 10),
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)
@@ -163,6 +174,14 @@ func merge(base Values, stored map[string]string) Values {
 	}
 	if v, ok := stored["acceptedTerms"]; ok {
 		out.AcceptedTerms = v
+	}
+	if v, ok := stored["contributor"]; ok {
+		out.Contributor = v == "1"
+	}
+	if v, ok := stored["tipSnoozedUnix"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			out.TipSnoozedUnix = n
+		}
 	}
 	return sanitize(out)
 }

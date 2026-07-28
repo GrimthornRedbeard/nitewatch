@@ -39,6 +39,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/rules"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
+	"github.com/threattape/nitewatch/agent/internal/tip"
 	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
@@ -82,6 +83,7 @@ func main() {
 
 	log.Printf("NiteWatch agent %s", version)
 	log.Print(legal.LogText)
+	log.Print(tip.LogText)
 	log.Printf("env: os=%s arch=%s elevated=%v", runtime.GOOS, runtime.GOARCH, platform.IsElevated())
 	if exe, err := os.Executable(); err == nil {
 		log.Printf("env: exe=%s", exe)

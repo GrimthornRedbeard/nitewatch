@@ -444,6 +444,19 @@
     border-radius: 10px; padding: 14px 16px; margin: 12px 0 0; max-height: 40vh;
     overflow: auto; }
   .termsact { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+  /* The buttons stay pinned and the text scrolls under them. On a short
+     window the ask is longer than the viewport, and letting the dismiss
+     button fall below the fold is the exact trick this notice claims not to
+     use — "you have to scroll to find the way out" is a dark pattern whether
+     or not it was intended as one. */
+  .tipmodal .box { max-width: 700px; display: flex; flex-direction: column; overflow: hidden; }
+  .tipmodal h2, .tipact, .tipmodal #tip-note { flex: none; }
+  .tipmodal #tip-body { overflow-y: auto; min-height: 0; }
+  /* A rule and a little breathing room, so the pinned footer reads as a
+     footer rather than as text that has been abruptly cut off. */
+  .tipmodal .tipact { border-top: 1px solid var(--line); padding-top: 16px; }
+  .tipact { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .tipact .btn { text-decoration: none; }
   /* Nothing behind the notice is usable until it is answered. */
   /* The help modal is excluded too: the notice links to it, so it has to be
      readable and clickable while the notice is still up. Blurring it made the
@@ -552,6 +565,7 @@
     <button class="btn" id="group-btn" title="Group connections by program, or list them flat">Grouped</button>
     <button class="btn" id="cols-btn" title="Choose which columns to show">Columns</button>
     <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
+    <button class="btn" id="tip-btn" title="NiteWatch is free. If it earns its keep.">Tip the author</button>
     <button class="btn" id="settings-btn">Settings</button>
   </div>
 </header>
@@ -678,6 +692,23 @@
     <p class="hint" id="terms-note" style="margin-top:14px">
       Accepting records that you read this, on this computer only. If the terms change,
       you will see them again.
+    </p>
+  </div>
+</div>
+
+<div class="modal tipmodal" id="tip-modal">
+  <div class="box">
+    <h2 id="tip-headline"></h2>
+    <div id="tip-body" class="termsbody"></div>
+
+    <div class="tipact">
+      <a class="btn primary" id="tip-pay" href="#" target="_blank" rel="noopener noreferrer">Chip in</a>
+      <button class="btn" id="tip-later">Not right now</button>
+      <button class="btn" id="tip-done">I contribute monthly — stop asking</button>
+    </div>
+    <p class="hint" id="tip-note" style="margin-top:14px">
+      "Chip in" opens PayPal in a new tab. That is the only thing on this page that
+      goes anywhere, and only because you pressed it.
     </p>
   </div>
 </div>
@@ -1240,6 +1271,82 @@
     return frag;
   }
 
+  // ── the contribution notice ───────────────────────────────────────
+  // Shareware, including the part where it is dismissible and means it. The
+  // pacing decision is the server's: a reload must not be able to re-trigger
+  // this, and "not right now" has to still be true after clearing site data.
+  //
+  // Deliberately missing: a countdown before the dismiss button works, a
+  // second prompt on the way out, and a "no thanks, I don't value my security"
+  // decline button. Every one of those raises conversion. A tool asking you to
+  // trust its judgement about your computer cannot also be caught working you
+  // over five dollars.
+  let TIP = null;
+
+  async function loadTip() {
+    if (!TIP) TIP = await getJSON("/api/tip");
+    // Rendered on every open, not just the first: saying "I contribute"
+    // rewrites this box into a thank-you, and reopening it from the header
+    // afterwards must show the ask again rather than a stale acknowledgement.
+    $("tip-headline").textContent = TIP.headline;
+    $("tip-body").replaceChildren(termsMarkup(TIP.body));
+    $("tip-pay").href = TIP.payPal;
+    $("tip-pay").hidden = false;
+    $("tip-done").hidden = false;
+    $("tip-done").disabled = false;
+    $("tip-later").textContent = "Not right now";
+    $("tip-note").textContent = '"Chip in" opens PayPal in a new tab. That is the only ' +
+      "thing on this page that goes anywhere, and only because you pressed it.";
+    return TIP;
+  }
+
+  async function maybeShowTip() {
+    try {
+      const t = await loadTip();
+      if (t.show) $("tip-modal").classList.add("show");
+    } catch (e) { /* never block the dashboard over a donation prompt */ }
+  }
+
+  async function openTip() {
+    try {
+      await loadTip();
+      $("tip-modal").classList.add("show");
+    } catch (e) { /* nothing to show, and nothing worth reporting */ }
+  }
+
+  function closeTip() { $("tip-modal").classList.remove("show"); }
+
+  // Both buttons record a dismissal, so pressing "Chip in" and closing the tab
+  // does not mean being asked again on the next load.
+  async function dismissTip(contributor) {
+    try {
+      await post("/api/tip/dismiss" + (contributor ? "?contributor=1" : ""));
+    } catch (e) { /* it will ask again tomorrow; not worth an error message */ }
+  }
+
+  $("tip-btn").addEventListener("click", openTip);
+  $("tip-later").addEventListener("click", () => { closeTip(); dismissTip(false); });
+  $("tip-done").addEventListener("click", async () => {
+    $("tip-done").disabled = true;
+    await dismissTip(true);
+    if (TIP) {
+      TIP.show = false;
+      // Acknowledge it in place rather than closing instantly: being thanked
+      // is the whole return on the click, and there is no receipt to send.
+      $("tip-body").replaceChildren(termsMarkup(TIP.thanks));
+      $("tip-later").textContent = "Close";
+      $("tip-done").hidden = true;
+      $("tip-pay").hidden = true;
+      $("tip-note").textContent = "";
+    }
+  });
+  // Clicking "Chip in" opens PayPal in a new tab; snooze rather than close, so
+  // the text is still there when they come back.
+  $("tip-pay").addEventListener("click", () => { post("/api/tip/dismiss").catch(() => {}); });
+  $("tip-modal").addEventListener("click", (e) => {
+    if (e.target === $("tip-modal")) dismissTip(false);
+  });
+
   async function showTermsIfNeeded() {
     let t;
     try {
@@ -1247,7 +1354,7 @@
     } catch (e) {
       return; // an agent without settings cannot record acceptance; do not trap the user
     }
-    if (t.accepted) return;
+    if (t.accepted) { maybeShowTip(); return; }
 
     $("terms-headline").textContent = t.headline;
     $("terms-plain").replaceChildren(termsMarkup(t.plain));
@@ -1279,6 +1386,7 @@
       if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
       $("terms-modal").classList.remove("show");
       document.body.classList.remove("locked");
+      maybeShowTip();
     } catch (e) {
       b.disabled = false;
       $("terms-note").textContent = "That could not be recorded: " + (e.message || e);

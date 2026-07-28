@@ -28,6 +28,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/selftest"
 	"github.com/threattape/nitewatch/agent/internal/settings"
+	"github.com/threattape/nitewatch/agent/internal/tip"
 	"github.com/threattape/nitewatch/agent/internal/vt"
 )
 
@@ -179,6 +180,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/terms", s.handleTerms)
 	mux.HandleFunc("/api/help", s.handleHelp)
 	mux.HandleFunc("/api/terms/accept", guardMutation(s.handleAcceptTerms))
+	mux.HandleFunc("/api/tip", s.handleTip)
+	mux.HandleFunc("/api/tip/dismiss", guardMutation(s.handleDismissTip))
 	mux.HandleFunc("/api/shutdown", guardMutation(s.handleShutdown))
 	// Both mutate: one writes alerts, the other deletes them. Guarded so no
 	// link or image can make the agent shout at somebody.
@@ -603,6 +606,61 @@ func (s *Server) handleAcceptTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("terms: accepted (version %s)", legal.Version())
 	writeJSON(w, map[string]any{"accepted": true, "version": legal.Version()})
+}
+
+// tipInterval is how long a dismissal lasts.
+//
+// Slightly under a day, so the notice does not settle into a fixed hour that a
+// user with a routine never happens to be at the machine for. Long enough that
+// nobody meets it twice in a working day.
+const tipInterval = 20 * time.Hour
+
+// handleTip serves the contribution notice and whether now is a moment to show
+// it. The decision is made here rather than in the page so that a reload cannot
+// re-trigger it, and so the pacing survives somebody clearing browser storage.
+func (s *Server) handleTip(w http.ResponseWriter, r *http.Request) {
+	show := false
+	if s.settings != nil {
+		v := s.settings.Get()
+		// Never over the disclaimer. Being asked for money before being told
+		// the software is unfinished and unwarranted has the order of those two
+		// conversations exactly backwards.
+		accepted := v.AcceptedTerms == legal.Version()
+		due := time.Since(time.Unix(v.TipSnoozedUnix, 0)) >= tipInterval
+		show = accepted && !v.Contributor && due
+	}
+	writeJSON(w, map[string]any{
+		"headline": tip.Headline,
+		"body":     tip.Body,
+		"thanks":   tip.Dismissed,
+		"payPal":   tip.PayPal,
+		"contact":  tip.Contact,
+		"show":     show,
+		"monthly":  tip.MonthlyThreshold,
+		"credits":  tip.CreditsThreshold,
+	})
+}
+
+// handleDismissTip records either "not now" or "I contribute".
+//
+// The contributor claim is stored exactly as given. There is no verification
+// step and there is not going to be one; see internal/tip for why.
+func (s *Server) handleDismissTip(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		http.Error(w, "settings unavailable, so this cannot be recorded",
+			http.StatusServiceUnavailable)
+		return
+	}
+	v := s.settings.Get()
+	v.TipSnoozedUnix = time.Now().Unix()
+	if r.URL.Query().Get("contributor") == "1" {
+		v.Contributor = true
+	}
+	if err := s.settings.Set(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"contributor": v.Contributor})
 }
 
 // handleShutdown stops the agent, for somebody who read the terms and decided
