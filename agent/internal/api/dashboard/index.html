@@ -32,6 +32,11 @@
     --bad: #ff9b9b;
     --crit: #ff6b6b;
     --high: #ffab52;
+    --c-blue: #6cb6ff;   --c-blue-soft: rgba(108,182,255,.16);
+    --c-violet: #b391ff; --c-violet-soft: rgba(179,145,255,.16);
+    --c-teal: #5fd7c4;   --c-teal-soft: rgba(95,215,196,.16);
+    --c-amber: #ffc46b;  --c-amber-soft: rgba(255,196,107,.16);
+    --c-rose: #ff9db4;   --c-rose-soft: rgba(255,157,180,.16);
     --sev-bg: #333d52;      --sev-fg: var(--muted);
     --sev-crit-bg: #581919;  --sev-crit-fg: #ffb3b3;
     --sev-high-bg: #55320f;  --sev-high-fg: #ffcb96;
@@ -69,6 +74,11 @@
     --bad: #b3261e;
     --crit: #b3261e;
     --high: #9a5b00;
+    --c-blue: #0f62c4;   --c-blue-soft: rgba(15,98,196,.10);
+    --c-violet: #6b3fd4; --c-violet-soft: rgba(107,63,212,.10);
+    --c-teal: #0a7d6e;   --c-teal-soft: rgba(10,125,110,.10);
+    --c-amber: #9a5b00;  --c-amber-soft: rgba(154,91,0,.12);
+    --c-rose: #b3325a;   --c-rose-soft: rgba(179,50,90,.10);
     --sev-bg: #e2e8f2;       --sev-fg: #43506b;
     --sev-crit-bg: #fbe3e1;  --sev-crit-fg: #96150f;
     --sev-high-bg: #fdeed6;  --sev-high-fg: #854d00;
@@ -105,6 +115,9 @@
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
     position: sticky; top: 0; z-index: 20; }
+  header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+    height: 2px; background: linear-gradient(90deg, var(--c-blue), var(--c-violet) 34%,
+      var(--c-teal) 68%, var(--c-amber)); opacity: .75; }
   header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
   header .tag { color: var(--muted); font-size: 14px; }
   @media (max-width: 640px) { header .tag { display: none; } }
@@ -140,10 +153,18 @@
     padding: 16px 20px; min-width: 156px; flex: 0 1 220px; box-shadow: var(--shadow);
     transition: border-color .18s var(--ease), transform .18s var(--ease),
                 box-shadow .18s var(--ease); }
-  .card:hover { border-color: var(--accent); transform: translateY(-3px);
-    box-shadow: var(--shadow), 0 0 0 3px var(--accent-soft); }
+  .card:hover { transform: translateY(-3px);
+    box-shadow: var(--shadow), 0 0 0 3px var(--card-soft, var(--accent-soft)); }
+  .card { position: relative; overflow: hidden; }
+  /* A hairline of the card's own colour along the top edge. */
+  .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: var(--card-hue, var(--accent)); opacity: .9; }
+  .card:nth-child(1) { --card-hue: var(--c-blue);   --card-soft: var(--c-blue-soft); }
+  .card:nth-child(2) { --card-hue: var(--c-violet); --card-soft: var(--c-violet-soft); }
+  .card:nth-child(3) { --card-hue: var(--c-teal);   --card-soft: var(--c-teal-soft); }
+  .card:hover { border-color: var(--card-hue); }
   .card .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
-    font-variant-numeric: tabular-nums; }
+    font-variant-numeric: tabular-nums; color: var(--card-hue, var(--fg)); }
   .card .l { color: var(--muted); font-size: 13px; font-weight: 600;
     text-transform: uppercase; letter-spacing: .07em; margin-top: 2px; }
 
@@ -168,6 +189,14 @@
     margin-left: 8px; vertical-align: 1px; }
   td.owner { color: var(--fg); }
   td.cc { font-variant: small-caps; letter-spacing: .04em; }
+  td.cc span { background: var(--c-teal-soft); color: var(--c-teal);
+    padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 13px; }
+  td.dir .out { color: var(--dim); }
+  td.dir .in { background: var(--c-amber-soft); color: var(--c-amber);
+    padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+  td.proto span { background: var(--panel-2); color: var(--muted); padding: 2px 8px;
+    border-radius: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
+  td.owner { color: var(--c-violet); font-weight: 600; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px;
     box-shadow: var(--shadow); }
@@ -238,7 +267,7 @@
     animation: rise .26s var(--ease); }
   .modal h2 { font-size: 19px; font-weight: 700; }
 
-  .tale { font-size: 16.5px; line-height: 1.72; color: #f2f5fa; margin: 16px 0 0;
+  .tale { font-size: 16.5px; line-height: 1.72; color: var(--fg); margin: 16px 0 0;
     padding: 16px 18px; background: var(--bg-2); border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0; }
   .stepstoggle { margin-top: 14px; font-size: 14px; color: var(--accent);
@@ -268,7 +297,7 @@
   .alert.critical { border-left-color: var(--crit); }
   .alert.high     { border-left-color: var(--high); }
   .alert.medium   { border-left-color: var(--new); }
-  .alert.low      { border-left-color: #7c8aa3; }
+  .alert.low      { border-left-color: var(--dim); }
   .alert h3 { margin: 0 0 9px; font-size: 17px; font-weight: 700; line-height: 1.35; }
   .alert .when { float: right; color: var(--muted); font-size: 13px; font-weight: 600; }
   .alert .stale { color: var(--new); }
@@ -343,7 +372,7 @@
   .lookup { margin-top: 16px; }
   .lookup .ext { display: block; color: var(--muted); font-size: 13.5px; margin-top: 8px;
     max-width: 62ch; line-height: 1.6; }
-  .lookup .btn.ext-btn { border-color: #4f6288; }
+  .lookup .btn.ext-btn { border-color: var(--accent); }
   .lookup .res { margin-top: 14px; padding: 15px 17px; background: var(--bg-2);
     border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; }
   .lookup .res dl { display: grid; grid-template-columns: max-content 1fr;
@@ -816,9 +845,11 @@
       [dest, c.domain ? "domain" : "raw", c.domain || "No DNS name seen for this address"],
       [hostPort(c.remoteIP, c.remotePort), "", hostPort(c.remoteIP, c.remotePort)],
       [c.asOrg || "—", "owner", c.asn ? "AS" + c.asn : "unknown owner"],
-      [c.country || "—", "cc", ""],
-      [c.proto || "", "", ""],
-      [c.inbound ? "in ←" : "out →", "", c.inbound ? "They contacted this PC" : "This PC contacted them"],
+      [c.country || "—", "cc", "", c.country ? "chip" : ""],
+      [c.proto || "", "proto", "", c.proto ? "chip" : ""],
+      [c.inbound ? "in ←" : "out →", "dir",
+       c.inbound ? "They contacted this PC" : "This PC contacted them",
+       c.inbound ? "in" : "out"],
       [bytes(c.bytesSent), "num", ""],
       [bytes(c.bytesRecv), "num", ""],
       [String(c.events || 1), "num", ""],
@@ -840,11 +871,25 @@
     const cells = rowCells(c);
     for (let i = 0; i < ROW_CELLS; i++) {
       const td = tr.children[i];
-      const [text, cls, title] = cells[i];
+      const [text, cls, title, chip] = cells[i];
       // A value that just changed is worth pointing at. Only on existing rows —
       // on a brand-new row every cell is "changed", which would be noise.
       const changed = !isNew && td.textContent !== "" && td.textContent !== text;
-      setText(td, text);
+      if (chip) {
+        // A chip needs an inner element to carry the background. Reuse it
+        // rather than rebuilding, so reconciliation stays cheap.
+        let span = td.firstElementChild;
+        if (!span || span.tagName !== "SPAN") {
+          td.textContent = "";
+          span = document.createElement("span");
+          td.appendChild(span);
+        }
+        setText(span, text);
+        if (span.className !== chip) span.className = chip;
+      } else {
+        if (td.firstElementChild) td.textContent = "";
+        setText(td, text);
+      }
       if (td.className !== cls) td.className = cls;
       setAttr(td, "title", title);
       if (changed && MOTION) {
