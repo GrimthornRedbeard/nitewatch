@@ -35,6 +35,10 @@ type Values struct {
 	// fingerprint. Empty by default: the feature does not exist until the user
 	// supplies their own key, so the account doing the asking is theirs.
 	VirusTotalKey string `json:"virusTotalKey"`
+	// AcceptedTerms records the version of the pre-release disclaimer the user
+	// accepted. Storing the version rather than a boolean means editing the
+	// terms re-prompts, instead of relying on consent given to different words.
+	AcceptedTerms string `json:"acceptedTerms"`
 }
 
 // Defaults are the shipped configuration.
@@ -121,6 +125,7 @@ func (s *Store) persist(v Values) error {
 		"dedupSeconds":  strconv.Itoa(v.DedupSeconds),
 		"retentionDays": strconv.Itoa(v.RetentionDays),
 		"virusTotalKey": strings.TrimSpace(v.VirusTotalKey),
+		"acceptedTerms": strings.TrimSpace(v.AcceptedTerms),
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)
@@ -155,6 +160,9 @@ func merge(base Values, stored map[string]string) Values {
 	}
 	if v, ok := stored["virusTotalKey"]; ok {
 		out.VirusTotalKey = v
+	}
+	if v, ok := stored["acceptedTerms"]; ok {
+		out.AcceptedTerms = v
 	}
 	return sanitize(out)
 }

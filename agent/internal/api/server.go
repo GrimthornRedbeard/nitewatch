@@ -8,8 +8,10 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/explain"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/legal"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
@@ -42,6 +45,7 @@ type Server struct {
 	token         *Token
 	rdap          *rdap.Client
 	vt            *vt.Client
+	stop          func()
 	engine        *detect.Engine
 	feeds         *intel.Store
 	addr          string
@@ -91,6 +95,13 @@ func (s *Server) WithExecutor(e respond.Executor, quarantineDir string) *Server 
 // act; firing it is a second deliberate act, by the user, per address.
 func (s *Server) WithLookups(c *rdap.Client) *Server {
 	s.rdap = c
+	return s
+}
+
+// WithShutdown lets the dashboard stop the agent, which is what "I do not
+// accept these terms" has to mean to be worth anything.
+func (s *Server) WithShutdown(stop func()) *Server {
+	s.stop = stop
 	return s
 }
 
@@ -164,6 +175,9 @@ func (s *Server) Handler() http.Handler {
 	// Nothing should be able to trigger it by embedding a URL.
 	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
 	mux.HandleFunc("/api/explain", s.handleExplain)
+	mux.HandleFunc("/api/terms", s.handleTerms)
+	mux.HandleFunc("/api/terms/accept", guardMutation(s.handleAcceptTerms))
+	mux.HandleFunc("/api/shutdown", guardMutation(s.handleShutdown))
 	// Both mutate: one writes alerts, the other deletes them. Guarded so no
 	// link or image can make the agent shout at somebody.
 	mux.HandleFunc("/api/selftest", guardMutation(s.handleSelfTest))
@@ -541,6 +555,67 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		"store":    isStore,
 		"package":  map[string]any{"name": pkg, "version": ver, "publisherId": pubID},
 	})
+}
+
+// handleTerms serves the pre-release disclaimer and whether it has been
+// accepted. Readable without accepting, obviously — refusing to show somebody
+// the terms until they agree to them would be quite the trick.
+func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
+	accepted := false
+	if s.settings != nil {
+		accepted = s.settings.Get().AcceptedTerms == legal.Version()
+	}
+	writeJSON(w, map[string]any{
+		"headline": legal.Headline,
+		"plain":    legal.Plain,
+		"formal":   legal.Formal,
+		"version":  legal.Version(),
+		"accepted": accepted,
+	})
+}
+
+func (s *Server) handleAcceptTerms(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.settings == nil {
+		http.Error(w, "settings unavailable, so acceptance cannot be recorded",
+			http.StatusServiceUnavailable)
+		return
+	}
+	v := s.settings.Get()
+	v.AcceptedTerms = legal.Version()
+	if err := s.settings.Set(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("terms: accepted (version %s)", legal.Version())
+	writeJSON(w, map[string]any{"accepted": true, "version": legal.Version()})
+}
+
+// handleShutdown stops the agent, for somebody who read the terms and decided
+// no. Declining and then leaving the thing running would make the choice
+// meaningless.
+//
+// This adds no capability an attacker does not already have: anything holding
+// the API token runs as the same user and can simply kill the process.
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	log.Print("shutdown: requested from the dashboard")
+	writeJSON(w, map[string]any{"stopping": true})
+	go func() {
+		// Let the response reach the browser before the process goes away.
+		time.Sleep(400 * time.Millisecond)
+		if s.stop != nil {
+			s.stop()
+			return
+		}
+		os.Exit(0)
+	}()
 }
 
 type alertDTO struct {

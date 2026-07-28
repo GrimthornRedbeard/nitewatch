@@ -30,6 +30,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/legal"
 	"github.com/threattape/nitewatch/agent/internal/notify"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
@@ -80,6 +81,7 @@ func main() {
 	}()
 
 	log.Printf("NiteWatch agent %s", version)
+	log.Print(legal.LogText)
 	log.Printf("env: os=%s arch=%s elevated=%v", runtime.GOOS, runtime.GOARCH, platform.IsElevated())
 	if exe, err := os.Executable(); err == nil {
 		log.Printf("env: exe=%s", exe)
@@ -156,7 +158,8 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 			WithLookups(rdap.New()).
 			// The on-demand drill. Needs the live engine and feed store so the
 			// test exercises the real rules rather than a copy of them.
-			WithSelfTest(eng, feeds)
+			WithSelfTest(eng, feeds).
+			WithShutdown(stop)
 		if tok, err := api.NewToken(baseDir()); err == nil {
 			srv = srv.WithToken(tok)
 			log.Printf("api: token required; stored at %s", tok.Path())

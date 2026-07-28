@@ -404,6 +404,22 @@
     font-weight: 600; font-size: 15px; padding: 6px 0; }
   .collist label.locked { opacity: .55; cursor: default; }
   .collist .why { border: 0; padding: 0; margin: 0; font-size: 13px; color: var(--dim); }
+  /* The disclaimer sits above everything, including other modals, and has no
+     backdrop click-to-close: the only ways out are the two buttons. */
+  .modal.terms { z-index: 200; background: rgba(4,8,18,.88); }
+  .modal.terms .box { max-width: 760px; }
+  .termsbody { font-size: 16px; line-height: 1.72; color: var(--fg); }
+  .termsbody p { margin: 0 0 14px; }
+  .termsbody strong { color: var(--accent); }
+  .termsbody a { font-weight: 600; }
+  .termsformal { white-space: pre-wrap; font: 400 12.5px/1.6 var(--mono);
+    color: var(--muted); background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0 0; max-height: 40vh;
+    overflow: auto; }
+  .termsact { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+  /* Nothing behind the notice is usable until it is answered. */
+  body.locked > *:not(#terms-modal) { filter: blur(3px); pointer-events: none;
+    user-select: none; }
   .gloss { display: grid; gap: 16px; }
   .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
   .gloss dd { margin: 4px 0 0; color: var(--fg); font-size: 15px; line-height: 1.65; }
@@ -590,6 +606,24 @@
     what started it, everywhere it talks, how much it sends.
     <b>Click anywhere else in a row</b> for the chain of events behind that one
     connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+</div>
+
+<!-- Shown before anything else, and not dismissible except by deciding. -->
+<div class="modal terms" id="terms-modal">
+  <div class="box">
+    <h2 id="terms-headline"></h2>
+    <div id="terms-plain" class="termsbody"></div>
+    <div class="stepstoggle" id="terms-toggle">▸ Show the formal wording</div>
+    <pre id="terms-formal" class="termsformal" hidden></pre>
+    <div class="termsact">
+      <button class="btn primary" id="terms-accept">I understand — let me in</button>
+      <button class="btn danger" id="terms-decline">No thanks — shut it down</button>
+    </div>
+    <p class="hint" id="terms-note" style="margin-top:14px">
+      Accepting records that you read this, on this computer only. If the terms change,
+      you will see them again.
+    </p>
+  </div>
 </div>
 
 <div class="modal" id="test-modal">
@@ -841,6 +875,93 @@
              (c.remoteIP && c.remoteIP.toLowerCase().includes(q));
     });
   }
+
+  // ── the pre-release notice ────────────────────────────────────────
+  // Blocking, deliberately. Everything this program does — reading kernel
+  // telemetry, stopping processes, quarantining files — is worth knowing about
+  // before it starts, and a notice nobody has to answer is a notice nobody
+  // reads.
+  //
+  // Acceptance is recorded against the VERSION of the terms, so editing them
+  // asks again rather than leaning on consent given to different words.
+  function termsMarkup(text) {
+    // The source is plain text with **bold** runs and one email address. Built
+    // as elements rather than by injecting HTML, so the disclaimer can never
+    // become an injection route.
+    const frag = document.createDocumentFragment();
+    for (const para of text.split("\n\n")) {
+      const p = document.createElement("p");
+      para.split(/(\*\*[^*]+\*\*)/).forEach(part => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          const b = document.createElement("strong");
+          b.textContent = part.slice(2, -2);
+          p.appendChild(b);
+        } else if (part.includes("threattape@gmail.com")) {
+          const [before, after] = part.split("threattape@gmail.com");
+          p.appendChild(document.createTextNode(before));
+          const a = document.createElement("a");
+          a.href = "mailto:threattape@gmail.com";
+          a.textContent = "threattape@gmail.com";
+          p.appendChild(a);
+          p.appendChild(document.createTextNode(after));
+        } else if (part) {
+          p.appendChild(document.createTextNode(part));
+        }
+      });
+      frag.appendChild(p);
+    }
+    return frag;
+  }
+
+  async function showTermsIfNeeded() {
+    let t;
+    try {
+      t = await getJSON("/api/terms");
+    } catch (e) {
+      return; // an agent without settings cannot record acceptance; do not trap the user
+    }
+    if (t.accepted) return;
+
+    $("terms-headline").textContent = t.headline;
+    $("terms-plain").replaceChildren(termsMarkup(t.plain));
+    $("terms-formal").textContent = t.formal;
+    document.body.classList.add("locked");
+    $("terms-modal").classList.add("show");
+  }
+
+  $("terms-toggle").addEventListener("click", () => {
+    const el = $("terms-formal");
+    el.hidden = !el.hidden;
+    $("terms-toggle").textContent = (el.hidden ? "▸ Show" : "▾ Hide") + " the formal wording";
+  });
+
+  $("terms-accept").addEventListener("click", async () => {
+    const b = $("terms-accept");
+    b.disabled = true;
+    try {
+      const r = await post("/api/terms/accept");
+      if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
+      $("terms-modal").classList.remove("show");
+      document.body.classList.remove("locked");
+    } catch (e) {
+      b.disabled = false;
+      $("terms-note").textContent = "That could not be recorded: " + (e.message || e);
+    }
+  });
+
+  $("terms-decline").addEventListener("click", async () => {
+    $("terms-accept").disabled = true;
+    $("terms-decline").disabled = true;
+    $("terms-note").textContent = "Stopping NiteWatch. You can close this tab.";
+    try { await post("/api/shutdown"); } catch (e) { /* it is going away regardless */ }
+    $("terms-plain").replaceChildren(termsMarkup(
+      "**NiteWatch has been stopped.** Nothing is being recorded.\n\n" +
+      "If you change your mind, start it again and you will see this notice once more. " +
+      "If something here put you off and it was not the risk itself, I would like to " +
+      "know which part: threattape@gmail.com"));
+    $("terms-formal").hidden = true;
+    $("terms-toggle").hidden = true;
+  });
 
   // ── rendering ─────────────────────────────────────────────────────
   // The table and the alert list are RECONCILED, not rebuilt.
@@ -1926,6 +2047,7 @@
     if (want) { await loadTerms(); setPlain(true); }
   })();
 
+  showTermsIfNeeded();
   loadColumns();
   paintHeaders();
   refresh();
