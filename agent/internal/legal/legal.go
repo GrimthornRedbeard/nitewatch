@@ -28,7 +28,7 @@ const Headline = "Read this before you trust it"
 // see is in Formal below, and the notice shows both.
 const Plain = `I'll keep this short, because you have clicked through a hundred of these and read none of them.
 
-**NiteWatch is not finished.** This is pre-release software, still being built. It has bugs I know about — they are listed in docs/known-limitations.md, and I would rather you read that than this — and bugs I do not, which are the interesting ones.
+**NiteWatch is not finished.** This is pre-release software, still being built. It has bugs I know about — they are listed under **Limits** in the header, and I would rather you read that than this — and bugs I do not, which are the interesting ones.
 
 **It is not signed.** Windows will warn you about it. Windows is right to warn you: you are running an unsigned program that reads kernel telemetry and opens a network listener. You should find that suspicious. I would.
 
@@ -76,6 +76,6 @@ const LogText = `---------------------------------------------------------------
  and no substitute for it — leave Defender on. It can miss real problems and
  report harmless ones. Remediation buttons act immediately on real programs
  and files. You use it entirely at your own risk.
- Full text: open the dashboard, or read docs/known-limitations.md
+ Full text and the known limitations: open the dashboard (Limits, in the header)
  Questions: threattape@gmail.com
 -------------------------------------------------------------------------`

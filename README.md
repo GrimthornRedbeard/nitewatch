@@ -42,7 +42,9 @@ question.
 - Design: [docs/plans/2026-07-24-nitewatch-design.md](docs/plans/2026-07-24-nitewatch-design.md)
 - Phase plans: [P1](docs/plans/2026-07-25-p1-flight-recorder.md) · [P2](docs/plans/2026-07-25-p2-detections.md)
 - Feed licensing (read before adding a source): [docs/feed-licensing.md](docs/feed-licensing.md)
-- Known limitations: [docs/known-limitations.md](docs/known-limitations.md)
+- Known limitations: [agent/internal/help/known-limitations.md](agent/internal/help/known-limitations.md)
+  — compiled into the binary and readable in the dashboard under **Limits**, so it
+  travels with a build rather than living only in this repository
 
 ## Running it
 

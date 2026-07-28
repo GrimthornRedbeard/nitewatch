@@ -19,6 +19,7 @@ import (
 
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/explain"
+	"github.com/threattape/nitewatch/agent/internal/help"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/legal"
@@ -176,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
 	mux.HandleFunc("/api/explain", s.handleExplain)
 	mux.HandleFunc("/api/terms", s.handleTerms)
+	mux.HandleFunc("/api/help", s.handleHelp)
 	mux.HandleFunc("/api/terms/accept", guardMutation(s.handleAcceptTerms))
 	mux.HandleFunc("/api/shutdown", guardMutation(s.handleShutdown))
 	// Both mutate: one writes alerts, the other deletes them. Guarded so no
@@ -555,6 +557,15 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		"store":    isStore,
 		"package":  map[string]any{"name": pkg, "version": ver, "publisherId": pubID},
 	})
+}
+
+// handleHelp serves the known-limitations document, compiled into the binary.
+//
+// The disclaimer tells people to read it, and somebody running the exe has no
+// repository to read it in — so it travels with the build or the instruction is
+// worthless.
+func (s *Server) handleHelp(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"docs": help.Docs()})
 }
 
 // handleTerms serves the pre-release disclaimer and whether it has been
