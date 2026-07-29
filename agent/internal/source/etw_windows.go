@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/0xrawsec/golang-etw/etw"
@@ -284,9 +283,26 @@ func (s *etwSource) normalize(e *etw.Event) (event.NormalizedEvent, bool) {
 		name := str(e.EventData, "FileName", "FilePath", "OpenPath")
 		key := str(e.EventData, "FileKey", "FileObject")
 
+		// A close releases the kernel pointer, so the name must go with it.
+		// Nothing did this before, which is half of why a recycled handle
+		// inherited the previous file's identity; put() refusing to rebind was
+		// the other half.
+		switch e.System.Task.Name {
+		case "Close", "Cleanup":
+			fileNames.forget(key)
+			return ne, false
+		}
+
 		if name != "" {
 			if key != "" && interestingPath(name) {
 				fileNames.put(key, name)
+			} else if key != "" {
+				// Named, but not a path worth alerting on. Drop any cached
+				// name for this key rather than leaving the previous one to be
+				// found: the handle demonstrably refers to something else now,
+				// and "no name" makes the event disappear while a stale name
+				// makes it a false accusation against whoever holds the handle.
+				fileNames.forget(key)
 			}
 		} else if key != "" {
 			name = fileNames.get(key)
@@ -331,44 +347,15 @@ func fileOperation(task string) (event.Kind, bool) {
 	return "", false
 }
 
-// fileNames maps ETW file keys to paths.
+// fileNames maps ETW file keys to paths. The cache itself lives in
+// namecache.go, without a build tag, so its reuse semantics are testable on a
+// machine that cannot run ETW — which is every machine this project is
+// developed on, and is why the recycled-handle bug survived as long as it did.
 //
 // Bounded on purpose: a file-name cache that grows with disk activity would be
 // a memory leak proportional to I/O, and the machine doing the most I/O is
 // exactly the one under attack.
 var fileNames = newNameCache(4096)
-
-type nameCache struct {
-	mu    sync.Mutex
-	max   int
-	names map[string]string
-	order []string
-}
-
-func newNameCache(max int) *nameCache {
-	return &nameCache{max: max, names: make(map[string]string, max)}
-}
-
-func (c *nameCache) put(key, name string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.names[key]; ok {
-		return
-	}
-	if len(c.order) >= c.max {
-		oldest := c.order[0]
-		c.order = c.order[1:]
-		delete(c.names, oldest)
-	}
-	c.names[key] = name
-	c.order = append(c.order, key)
-}
-
-func (c *nameCache) get(key string) string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.names[key]
-}
 
 // skipFragments are the bulk of user-profile I/O and never hold irreplaceable
 // data: caches, build output, browser scratch.
