@@ -57,13 +57,30 @@ cd agent && CGO_ENABLED=0 go build -o nitewatch ./cmd/nitewatch
 Cross-compile for Windows:
 
 ```bash
-cd agent && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -o ../dist/nitewatch.exe ./cmd/nitewatch
+cd agent && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o ../dist/nitewatch.exe ./cmd/nitewatch
 ```
+
+`-trimpath` matters: builds are reproducible, and released binaries have their
+SHA-256 published, so a build made without it will not match the hash on the
+download page even when the source is identical.
 
 `dist/` is git-ignored build output. To hand someone a working copy, ship the
 exe together with `agent/scripts/run-nitewatch.bat` — that launcher is the
 source of truth, and it must sit in the same directory as the exe because it
 self-elevates and then runs `nitewatch.exe` from its own location.
+
+**`dist/` is where a build is picked up from, so rebuild it whenever the thing
+being handed over changes.** A stale exe there is indistinguishable from a
+current one at a glance, and the file's timestamp does not help: Go stamps the
+*commit* time into the binary, not the build time, so a fresh build of old code
+and an old build of old code look the same. To check what a binary actually is:
+
+```bash
+go version -m dist/nitewatch.exe | grep vcs
+```
+
+The running agent reports the same identity in its About panel, which is the
+only way to check on a machine without Go.
 
 **Windows (live)** — must run **elevated**; ETW requires Administrator:
 
