@@ -126,3 +126,24 @@ agent/
 ## Third-party data
 
 See [NOTICE](NOTICE) for required attributions.
+
+## Licence
+
+Copyright © 2026 Threat Tape LLC.
+
+NiteWatch is free software, licensed under the **GNU General Public License
+version 3 or later**. See `LICENSE` for the full text.
+
+The licence is not a preference so much as an inheritance: the Windows
+event-tracing consumer this agent depends on (`github.com/0xrawsec/golang-etw`)
+is GPL-3.0, and linking it makes the whole program GPL-3.0. Check a
+dependency's licence before you ship a binary, not after.
+
+Every source file carries an SPDX header. `agent/internal/help/licenses.md` is
+compiled into the binary and shown in the dashboard's **Limits & roadmap**
+panel, which is where the GPL wants an interactive program's legal notices to
+be, and where the threat-intel feeds require their attributions to appear.
+
+Third-party components and their licences are listed in that document. The
+short version: golang-etw and golang-utils are GPL-3.0, gorapide is MIT,
+golang.org/x/sys and the modernc.org SQLite stack are BSD-3-Clause.

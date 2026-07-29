@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package source acquires telemetry and emits event.NormalizedEvent values.
 // The EventSource interface is the single seam between telemetry acquisition
 // and analysis: the real ETW consumer (Windows) and the JSONL replay source

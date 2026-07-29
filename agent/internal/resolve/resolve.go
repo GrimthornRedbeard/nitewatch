@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package resolve turns IP addresses into names when the passive DNS join
 // can't. The causal DNS join (graph.DomainFor) is always preferred — it records
 // the name the program actually asked for. This is the fallback: a cached

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package settings holds the agent's user-editable configuration.
 //
 // Configuration lives in the ledger database and is edited from the dashboard,

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package rdap looks up who registered an address or a domain.
 //
 // PRIVACY: this is the ONE place in NiteWatch that queries a third party about

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package tip holds the shareware-style contribution notice.
 //
 // The text lives here rather than in the HTML for the same reasons the

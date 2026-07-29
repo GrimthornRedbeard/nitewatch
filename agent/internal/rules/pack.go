@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package rules loads detection rule packs.
 //
 // Rules are DATA, not code: a pack is YAML carrying a detector name, severity,

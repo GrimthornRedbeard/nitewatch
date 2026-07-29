@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package help
 
 import (
@@ -8,12 +11,17 @@ import (
 
 // The disclaimer tells people to read these. Somebody running the exe has no
 // repository, so if they are not in the binary the instruction is worthless.
-func TestBothDocumentsAreEmbedded(t *testing.T) {
+//
+// The licence document is here for a second reason: the GPL asks that a program
+// with an interactive interface keep its legal notices reachable from it, and
+// the threat-intel feeds require their attributions be reproduced in an
+// "About" screen. A notice file sitting in a source tree satisfies neither.
+func TestAllDocumentsAreEmbedded(t *testing.T) {
 	docs := Docs()
-	if len(docs) != 2 {
-		t.Fatalf("expected 2 documents, got %d", len(docs))
+	if len(docs) != 3 {
+		t.Fatalf("expected 3 documents, got %d", len(docs))
 	}
-	want := map[string]bool{"limits": false, "roadmap": false}
+	want := map[string]bool{"limits": false, "roadmap": false, "licenses": false}
 	for _, d := range docs {
 		if _, ok := want[d.ID]; !ok {
 			t.Errorf("unexpected document %q", d.ID)
@@ -119,6 +127,34 @@ func TestDocsCarryTheContactAddress(t *testing.T) {
 	for _, d := range Docs() {
 		if !strings.Contains(d.Markdown, "threattape@gmail.com") {
 			t.Errorf("%s: no contact address, so a reader with a problem has nowhere to go", d.ID)
+		}
+	}
+}
+
+// A GPL binary has to tell its holder where the corresponding source is, and
+// name the version it belongs to. A licence document that omits that is a
+// licence document that does not comply.
+func TestLicenceDocumentCarriesTheSourceOffer(t *testing.T) {
+	var lic string
+	for _, d := range Docs() {
+		if d.ID == "licenses" {
+			lic = d.Markdown
+		}
+	}
+	if lic == "" {
+		t.Fatal("no licence document")
+	}
+	for _, needle := range []string{
+		"GNU General Public License",
+		"Threat Tape LLC",
+		"github.com/GrimthornRedbeard/nitewatch", // where the source lives
+		"WITHOUT ANY WARRANTY",
+		"0xrawsec/golang-etw",  // the dependency that sets the licence
+		"gorapide",             // MIT, attribution required
+		"threattape@gmail.com", // the fallback source offer
+	} {
+		if !strings.Contains(lic, needle) {
+			t.Errorf("licence document does not mention %q", needle)
 		}
 	}
 }

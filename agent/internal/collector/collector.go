@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package collector is the orchestration loop: it pulls normalized events off a
 // source, ingests them into the causal window, and records every outbound
 // connection — enriched with the domain joined from DNS — into the ledger.

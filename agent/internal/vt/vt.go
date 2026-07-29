@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package vt asks VirusTotal what antivirus engines make of a specific file.
 //
 // PRIVACY — read this before changing anything here.

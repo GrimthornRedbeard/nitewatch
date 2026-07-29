@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package rulesdata embeds the shipped detection rule packs.
 //
 // The packs live here, beside the YAML, and are embedded from this package

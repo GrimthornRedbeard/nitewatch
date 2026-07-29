@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package api exposes the ledger over a loopback-only HTTP+JSON interface for
 // the local dashboard. Binding is 127.0.0.1 exclusively — a hard privacy
 // constraint, never 0.0.0.0.

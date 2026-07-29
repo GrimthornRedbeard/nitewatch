@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package ledger is the persistent network flight recorder: every outbound
 // connection, with the process and resolved domain behind it, stored in a
 // pure-Go SQLite database (no CGO, keeping the single-static-exe promise).

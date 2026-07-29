@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package autostart watches the places software registers itself to run at
 // startup, and reports what appears there.
 //

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package respond executes remediation on the user's behalf.
 //
 // Everything here changes the machine, so three rules hold throughout:

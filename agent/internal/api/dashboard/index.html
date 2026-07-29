@@ -1193,6 +1193,12 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
         /^https?:\/\//.test(href)
           ? `<a href="${esc2(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
           : label)
+      // Markdown autolinks: <https://example.com>. The licence document is
+      // full of them — the source-offer URL, the GPL text — and without this
+      // they rendered with their angle brackets showing, which looks like a
+      // typo on the one page that has to read as authoritative.
+      .replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g,
+        (m, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`)
       // Bare addresses become mail links. Both documents end by asking the
       // reader to get in touch, and an address you have to select and copy out
       // of a modal is an address most people will not use. Applied last: by

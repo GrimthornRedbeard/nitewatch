@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package help carries the documents that must travel with the binary.
 //
 // The startup disclaimer tells the user to read the known-limitations document.
@@ -23,6 +26,9 @@ var knownLimitations string
 //go:embed roadmap.md
 var roadmap string
 
+//go:embed licenses.md
+var licenses string
+
 // Doc is one embedded document, ready to render.
 type Doc struct {
 	ID       string `json:"id"`
@@ -37,6 +43,11 @@ func Docs() []Doc {
 	return []Doc{
 		{ID: "limits", Title: titleOf(knownLimitations, "Known limitations"), Markdown: knownLimitations},
 		{ID: "roadmap", Title: titleOf(roadmap, "Roadmap"), Markdown: roadmap},
+		// Third: the copyright, the licence, and the third-party notices. GPL
+		// asks that a program with an interactive interface make these
+		// reachable from it, and the threat-intel feeds carry the same
+		// requirement in their own terms.
+		{ID: "licenses", Title: titleOf(licenses, "Copyright and Licences"), Markdown: licenses},
 	}
 }
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package filewatch classifies file activity and spots the shapes that matter:
 // mass encryption, and programs reading secrets they have no business reading.
 //

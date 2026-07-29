@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package legal holds the pre-release disclaimer the user must accept before
 // the dashboard will do anything.
 //
@@ -42,6 +45,8 @@ const Plain = `I'll keep this short, because you have clicked through a hundred 
 
 **You use this at your own risk.** Yours. Not Threat Tape's, not mine. If that is not acceptable — and it is an entirely sensible thing to find unacceptable — close it now. No hard feelings.
 
+**It is free software, and you can read every line of it.** Copyright © 2026 Threat Tape LLC, licensed under the GNU General Public License version 3 or later. Run it, read it, change it, pass it on — as long as whatever you pass on carries the same freedoms. The source is at github.com/GrimthornRedbeard/nitewatch, tagged per release, and the version this build came from is named under **Limits & roadmap**. A security tool asking you to trust its judgement about your computer is in a poor position to refuse to show you how it reaches that judgement.
+
 **Questions, complaints, or a bug that made you swear?** threattape@gmail.com. I would genuinely rather hear it from you than not hear it at all. Tell me what it said and what your computer was actually doing.`
 
 // Formal is the wording a court would expect, kept alongside the readable
@@ -76,6 +81,8 @@ const LogText = `---------------------------------------------------------------
  and no substitute for it — leave Defender on. It can miss real problems and
  report harmless ones. Remediation buttons act immediately on real programs
  and files. You use it entirely at your own risk.
- Full text and the known limitations: open the dashboard (Limits, in the header)
+ Free software under the GNU GPL v3 or later. Copyright (C) 2026 Threat Tape LLC.
+ Source: https://github.com/GrimthornRedbeard/nitewatch
+ Full text, known limitations and licences: open the dashboard (Limits & roadmap)
  Questions: threattape@gmail.com
 -------------------------------------------------------------------------`

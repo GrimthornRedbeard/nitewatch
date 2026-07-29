@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package explain turns the jargon on the dashboard into plain English.
 //
 // The product's promise is that somebody who does not work in security can read

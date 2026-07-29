@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package selftest proves the alerting machinery works, on demand, without
 // waiting for something bad to happen.
 //

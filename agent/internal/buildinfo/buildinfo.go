@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package buildinfo reports which build of NiteWatch is running.
 //
 // This exists because the product is about to be downloadable by strangers,

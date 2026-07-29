@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package event defines NiteWatch's source-agnostic telemetry vocabulary.
 // Every EventSource (real ETW on Windows, the JSONL replay source in tests)
 // emits NormalizedEvent values so the rest of the agent never sees ETW schemas.

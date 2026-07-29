@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package graph maintains the live causal event graph: it ingests
 // NormalizedEvents into a GoRapide poset and wires causal edges so the agent
 // can answer "who caused what" — which process opened a connection, which

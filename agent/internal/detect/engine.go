@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package detect evaluates rules against connections as they are recorded.
 //
 // Detectors are Go functions (matching needs ledger history, intel lookups, and

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Command nitewatch is the NiteWatch flight-recorder agent.
 //
 // Run modes:
@@ -44,7 +47,7 @@ import (
 	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
-var version = "0.1.2-pre"
+var version = "0.1.3-pre"
 
 // build is resolved once at startup. Go initialises it after version, since it
 // depends on it, so a version set at link time is still picked up.

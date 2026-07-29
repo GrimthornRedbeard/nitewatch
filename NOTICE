@@ -8,6 +8,12 @@ be reproduced in product documentation and in any "About"/legal screen.
 
 See docs/feed-licensing.md for the full per-source licensing analysis.
 
+The notices below, together with the copyright and licence terms for NiteWatch
+itself and for every third-party component, are reproduced in
+agent/internal/help/licenses.md, which is compiled into the binary and shown in
+the dashboard. That embedded copy is the one that satisfies these requirements
+for a user holding only the executable; this file is its source-tree twin.
+
 
 Emerging Threats Open (Proofpoint)
 ----------------------------------

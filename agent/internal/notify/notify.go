@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Threat Tape LLC
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package notify delivers alerts to the user outside the dashboard.
 //
 // Interruption is a budget, not a feature. Every toast spends a little of the
