@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/api"
+	"github.com/threattape/nitewatch/agent/internal/buildinfo"
 	"github.com/threattape/nitewatch/agent/internal/collector"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/intel"
@@ -43,7 +44,11 @@ import (
 	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.0-pre"
+
+// build is resolved once at startup. Go initialises it after version, since it
+// depends on it, so a version set at link time is still picked up.
+var build = buildinfo.Read(version)
 
 // baseDir is the directory the agent keeps its files in — next to the exe, so
 // there are no %ProgramData% permission variables to reason about during
@@ -81,7 +86,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("NiteWatch agent %s", version)
+	log.Printf("NiteWatch agent %s", build.Label())
 	log.Print(legal.LogText)
 	log.Print(tip.LogText)
 	log.Printf("env: os=%s arch=%s elevated=%v", runtime.GOOS, runtime.GOARCH, platform.IsElevated())
@@ -153,7 +158,7 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	var srv *api.Server
 	if serve {
 		quarantine := filepath.Join(baseDir(), "quarantine")
-		srv = api.New(led).WithSettings(cfg).
+		srv = api.New(led).WithSettings(cfg).WithBuild(build).
 			WithExecutor(respond.NewWindowsExecutor(quarantine), quarantine).
 			// Registration lookups. Available, never automatic: nothing reaches
 			// the registry unless the user presses the button for one address.

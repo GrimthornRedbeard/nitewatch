@@ -298,6 +298,12 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   .tale { font-size: 16.5px; line-height: 1.72; color: var(--fg); margin: 16px 0 0;
     padding: 16px 18px; background: var(--bg-2); border-left: 4px solid var(--accent);
     border-radius: 0 10px 10px 0; }
+  /* Quote-able build identity. A bug report that does not say which build it
+     came from costs more to act on than it is worth, and "check the log file"
+     is not a thing most people will do. */
+  .buildid { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; user-select: all; }
   .footdocs { margin-top: 12px; display: flex; gap: 20px; flex-wrap: wrap; }
   .footdocs a { font-weight: 600; font-size: 14px; }
   .stepstoggle { margin-top: 14px; font-size: 15px; color: var(--accent);
@@ -795,6 +801,7 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     <h2 id="help-title">About this build</h2>
     <p class="hint">Both documents are built into the version you are running, so they
       describe this build and not some other one.</p>
+    <p class="hint buildid" id="build-id"></p>
     <div class="seg" id="help-tabs" style="margin-bottom:16px"></div>
     <div id="help-body" class="doc"></div>
     <div style="margin-top:20px"><button class="btn primary" id="help-close">Close</button></div>
@@ -1248,7 +1255,15 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     $("help-modal").classList.add("show");
     if (!HELP_DOCS) {
       try {
-        HELP_DOCS = (await getJSON("/api/help")).docs || [];
+        const helpResp = await getJSON("/api/help");
+        HELP_DOCS = helpResp.docs || [];
+        if (helpResp.label) {
+          const b = helpResp.build || {};
+          $("build-id").textContent = "Build " + helpResp.label +
+            (b.built ? " · " + new Date(b.built).toLocaleDateString() : "") +
+            (b.go ? " · Go " + b.go : "") +
+            "  —  quote this in any bug report";
+        }
         $("help-tabs").innerHTML = HELP_DOCS.map(d =>
           `<button data-doc="${esc(d.id)}">${esc(d.title.replace(/^NiteWatch\s*[—-]\s*/, ""))}</button>`).join("");
         $("help-tabs").addEventListener("click", (e) => {

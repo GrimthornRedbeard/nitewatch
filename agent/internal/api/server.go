@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/threattape/nitewatch/agent/internal/buildinfo"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/explain"
 	"github.com/threattape/nitewatch/agent/internal/help"
@@ -51,6 +52,7 @@ type Server struct {
 	engine        *detect.Engine
 	feeds         *intel.Store
 	addr          string
+	build         buildinfo.Info
 
 	mu     sync.RWMutex
 	status Status
@@ -108,6 +110,12 @@ func (s *Server) WithShutdown(stop func()) *Server {
 }
 
 // WithSettings enables the dashboard's configuration panel.
+// WithBuild records which build is running, for display in the About panel.
+func (s *Server) WithBuild(b buildinfo.Info) *Server {
+	s.build = b
+	return s
+}
+
 func (s *Server) WithSettings(st *settings.Store) *Server {
 	s.settings = st
 	s.vt = vt.New(st.Get().VirusTotalKey)
@@ -568,7 +576,14 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 // repository to read it in — so it travels with the build or the instruction is
 // worthless.
 func (s *Server) handleHelp(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"docs": help.Docs()})
+	// The build identity rides along with the documents because they share a
+	// panel, and because "which version are you running?" is the first question
+	// asked of any bug report from a public download.
+	writeJSON(w, map[string]any{
+		"docs":  help.Docs(),
+		"build": s.build,
+		"label": s.build.Label(),
+	})
 }
 
 // handleTerms serves the pre-release disclaimer and whether it has been
