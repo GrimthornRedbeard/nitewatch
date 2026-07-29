@@ -91,9 +91,13 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// One writer. modernc's driver is safe for concurrent use, but serialising
-	// writes here avoids lock contention rather than merely surviving it, and
-	// the write path is a single goroutine anyway.
+	// A small pool, NOT a serialised one. The comment here used to claim writes
+	// were serialised, which this line has never done — and setting it to 1
+	// would be the wrong fix. Under WAL a single writer and several readers
+	// proceed concurrently, and the writer is already one goroutine (the
+	// collector); capping at 1 would instead queue the dashboard's reads behind
+	// every write. The cap exists to bound connection count, and busy_timeout
+	// covers the brief overlap when a reader meets a checkpoint.
 	h.SetMaxOpenConns(4)
 	if _, err := h.Exec(schema); err != nil {
 		h.Close()

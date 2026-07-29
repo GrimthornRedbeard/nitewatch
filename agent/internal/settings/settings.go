@@ -133,8 +133,8 @@ func (s *Store) persist(v Values) error {
 		"recon":          b2s(v.Recon),
 		"dedupSeconds":   strconv.Itoa(v.DedupSeconds),
 		"retentionDays":  strconv.Itoa(v.RetentionDays),
-		"virusTotalKey":  strings.TrimSpace(v.VirusTotalKey),
-		"acceptedTerms":  strings.TrimSpace(v.AcceptedTerms),
+		"virusTotalKey":  v.VirusTotalKey,
+		"acceptedTerms":  v.AcceptedTerms,
 		"contributor":    b2s(v.Contributor),
 		"tipSnoozedUnix": strconv.FormatInt(v.TipSnoozedUnix, 10),
 	} {
@@ -190,6 +190,16 @@ func merge(base Values, stored map[string]string) Values {
 // a zero dedup window would flood the ledger, an unbounded one would merge
 // unrelated conversations.
 func sanitize(v Values) Values {
+	// Trim here rather than only on the way to disk. persist() trimmed, Set()
+	// did not, so the running agent kept whatever the caller sent while the
+	// database held the tidy version — and a VirusTotal key pasted with a
+	// trailing newline (the usual result of copying one from a web page) was
+	// rejected for the rest of the session, then silently started working after
+	// a restart. Same hazard for AcceptedTerms, where a stray space would fail
+	// the version comparison and re-prompt forever.
+	v.VirusTotalKey = strings.TrimSpace(v.VirusTotalKey)
+	v.AcceptedTerms = strings.TrimSpace(v.AcceptedTerms)
+
 	if v.DedupSeconds < 1 {
 		v.DedupSeconds = 1
 	}
