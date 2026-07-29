@@ -1,0 +1,41 @@
+name: False alarm
+description: NiteWatch warned about something that turned out to be fine
+labels: ["false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful report you can file. The quiet-machine
+        false-positive rate is the number that decides whether this product is
+        honest, and it is currently unmeasured.
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: >-
+        Open **Limits & roadmap** in the dashboard — the line at the top reads
+        `Build 0.1.x-pre (abc1234)`. Without it the first question is always
+        "which build?", and a stale one has already cost a week of soak data.
+      placeholder: 0.1.3-pre (56711ed)
+    validations:
+      required: true
+  - type: textarea
+    id: alert
+    attributes:
+      label: What the alert said
+      description: >-
+        The whole thing — narrative, playbook and the "what led to this" chain.
+        The chain is usually where the wrongness shows. The **Ask about this**
+        button assembles it and copies it to your clipboard; it sends nothing
+        anywhere.
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What the computer was actually doing
+      description: >-
+        The part only you know, and the part that makes this fixable. "I was
+        installing a game", "it was 3am and I was asleep" — both useful.
+    validations:
+      required: true

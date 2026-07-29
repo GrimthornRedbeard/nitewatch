@@ -2,7 +2,16 @@
 
 **Date:** 2026-07-26
 **Prepared for:** legal review (Sparks)
-**Product:** NiteWatch — commercial, closed-source consumer security agent for Windows
+**Product:** NiteWatch — consumer security agent for Windows
+
+> **Superseded premise (2026-07-29).** This memo was written for a *commercial,
+> closed-source* product. NiteWatch is now licensed GPL-3.0-or-later, because the
+> Windows event-tracing library it links is GPL and that obligation was discovered
+> after the first binary was published. Several conclusions below were reached
+> under the old premise and need re-reading against the new one — feed data is
+> still downloaded at runtime rather than redistributed in the source tree, which
+> is the fact most of the analysis turns on, but that is a judgement for counsel
+> rather than an assumption to carry forward.
 
 ---
 

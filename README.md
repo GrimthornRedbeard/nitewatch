@@ -2,6 +2,17 @@
 
 **Somebody's knocking on your door at 3am. Here's who.**
 
+[![Licence: GPL v3](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-informational)
+![Status: pre-release](https://img.shields.io/badge/status-pre--release-orange)
+
+> **Pre-release, unsigned, and the false-positive rate is unmeasured.** Windows
+> will call it an unrecognised app; on Windows 11 with Smart App Control enabled
+> it will not run at all. A build is downloadable from
+> [threattape.com](https://threattape.com/products/nitewatch/#build) with the
+> caveats stated in full. Everything it cannot do is compiled into the binary and
+> one click from the dashboard.
+
 NiteWatch is a lightweight personal security agent for Windows. It watches what
 your computer is actually doing — which programs are running, who they're
 talking to, what files they're touching — and when something is wrong, it tells

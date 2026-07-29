@@ -1,0 +1,25 @@
+name: Bug
+description: Something is broken, wrong, or does not do what it says
+body:
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: From **Limits & roadmap** in the dashboard.
+      placeholder: 0.1.3-pre (56711ed)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >-
+        If you can get it to happen with a replay trace
+        (`--replay <file> --serve`) that is ideal, because it can then be fixed
+        and tested on any machine. Not required.
