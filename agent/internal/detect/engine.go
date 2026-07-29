@@ -101,17 +101,22 @@ func baseFields(s Subject) map[string]any {
 	}
 	return map[string]any{
 		"ProcessName": shortName(s.Conn.Image),
-		"ImagePath":   s.Conn.Image,
-		"PID":         s.Conn.PID,
-		"Destination": dest,
-		"RemoteIP":    s.Conn.RemoteIP,
-		"RemotePort":  s.Conn.RemotePort,
-		"Domain":      s.Domain,
-		"Owner":       s.Recon.Org,
-		"BytesSent":   humanBytes(s.Conn.BytesSent),
-		"BytesRecv":   humanBytes(s.Conn.BytesRecv),
-		"Country":     s.Recon.Country,
-		"ASN":         s.Recon.ASN,
+		// ProcessKnown lets a rule word itself differently when the acting
+		// program could not be identified — which happens when a connection is
+		// seen for a process that started before the agent did and has since
+		// exited.
+		"ProcessKnown": s.Conn.Image != "",
+		"ImagePath":    s.Conn.Image,
+		"PID":          s.Conn.PID,
+		"Destination":  dest,
+		"RemoteIP":     s.Conn.RemoteIP,
+		"RemotePort":   s.Conn.RemotePort,
+		"Domain":       s.Domain,
+		"Owner":        s.Recon.Org,
+		"BytesSent":    humanBytes(s.Conn.BytesSent),
+		"BytesRecv":    humanBytes(s.Conn.BytesRecv),
+		"Country":      s.Recon.Country,
+		"ASN":          s.Recon.ASN,
 	}
 }
 
@@ -122,7 +127,11 @@ func shortName(p string) string {
 		}
 	}
 	if p == "" {
-		return "An unknown program"
+		// Lower case and indefinite, so it reads as a description wherever a
+		// template drops it: "...stop an unidentified program". The previous
+		// value was capitalised, which produced "Do you recognise An unknown
+		// program?" and made a gap in our data look like a program's name.
+		return "an unidentified program"
 	}
 	return p
 }
@@ -173,14 +182,24 @@ func detectRawIPNoDNS(s Subject, _ *Engine) map[string]any {
 	if s.HadDNS || s.Conn.Inbound || !s.FirstContact {
 		return nil
 	}
+	// Half this rule is a claim about the program: that nobody vouches for it.
+	// With no image we never checked, so "software with no publisher" is not a
+	// finding, it is a gap in our own data being reported as evidence. It also
+	// leaves the reader nothing to act on — you cannot recognise, allow or stop
+	// a program that has no name.
+	if s.Conn.Image == "" {
+		return nil
+	}
 	// A name from any source means the destination is identifiable, which is
 	// the opposite of hiding.
 	if s.Domain != "" {
 		return nil
 	}
-	// Signed software is accountable to a publisher; that alone removes this
-	// weak signal's entire basis.
-	if s.Event.Signed {
+	// Software with an accountable publisher removes this weak signal's entire
+	// basis. "Accountable" is broader than "carries an Authenticode signature":
+	// Store apps are signed at the package level and report as unsigned here,
+	// and Windows' own components are vouched for by where they live.
+	if PublisherVouched(s.Conn.Image, s.Event.Signed, s.Event.Signer) {
 		return nil
 	}
 	// Ownership data is what makes the rest judgeable, and it loads in the
@@ -223,7 +242,13 @@ func SharedInfrastructure(org string) bool {
 // contact with a destination. Signature data is Windows-only; elsewhere Signed
 // is false for everything, so the FirstContact gate keeps this quiet.
 func detectUnsignedOutbound(s Subject, _ *Engine) map[string]any {
-	if s.Event.Signed || s.Conn.Inbound || !s.FirstContact {
+	if s.Conn.Inbound || !s.FirstContact {
+		return nil
+	}
+	// See detectRawIPNoDNS: an unsigned binary under WindowsApps is a Store app
+	// whose signature lives on the package, not the file. Reporting those as
+	// "software with no publisher" fired on every Store app the user owned.
+	if PublisherVouched(s.Conn.Image, s.Event.Signed, s.Event.Signer) {
 		return nil
 	}
 	if s.Event.Kind != event.KindNetConnect || s.Conn.Image == "" {
@@ -238,6 +263,11 @@ func detectUnsignedOutbound(s Subject, _ *Engine) map[string]any {
 // legitimate services are hosted abroad.
 func detectForeignFirstContact(s Subject, _ *Engine) map[string]any {
 	if !s.FirstContact || s.Conn.Inbound || s.Recon.Country == "" {
+		return nil
+	}
+	// Geography alone is a hint, and a hint about an unnamed program is not
+	// something anybody can act on.
+	if s.Conn.Image == "" {
 		return nil
 	}
 	if !watchedCountry(s.Recon.Country) {

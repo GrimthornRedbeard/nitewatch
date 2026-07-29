@@ -96,3 +96,43 @@ func TestDedupWindowDuration(t *testing.T) {
 		t.Fatalf("window = %v s, want 300", got)
 	}
 }
+
+// A key pasted with a trailing newline must not be usable in memory while the
+// database holds the trimmed version.
+//
+// persist() trimmed on the way to disk and Set() did not, so the running agent
+// kept the untrimmed value. VirusTotal rejects a key with whitespace, so the
+// feature stayed broken for the whole session and then silently began working
+// after a restart — the worst shape a bug can take, because the user's own fix
+// (restart) makes it disappear without explaining anything.
+func TestSettingsTrimPastedValues(t *testing.T) {
+	db := openDB(t)
+	st, err := Open(db, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := st.Get()
+	v.VirusTotalKey = "  abcdef0123456789\n"
+	v.AcceptedTerms = " deadbeefcafe \t"
+	if err := st.Set(v); err != nil {
+		t.Fatal(err)
+	}
+
+	got := st.Get()
+	if got.VirusTotalKey != "abcdef0123456789" {
+		t.Errorf("in-memory key = %q, want it trimmed", got.VirusTotalKey)
+	}
+	if got.AcceptedTerms != "deadbeefcafe" {
+		t.Errorf("in-memory terms = %q, want it trimmed", got.AcceptedTerms)
+	}
+
+	// And what a restart reads back must be the same thing.
+	again, err := Open(db, Defaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := again.Get(); r.VirusTotalKey != got.VirusTotalKey || r.AcceptedTerms != got.AcceptedTerms {
+		t.Errorf("after reopen: %q/%q, want %q/%q",
+			r.VirusTotalKey, r.AcceptedTerms, got.VirusTotalKey, got.AcceptedTerms)
+	}
+}

@@ -72,10 +72,33 @@ type DB struct {
 // Open opens (creating if needed) the ledger database at path and applies the
 // schema.
 func Open(path string) (*DB, error) {
-	h, err := sql.Open("sqlite", path)
+	// The collector writes continuously while the dashboard reads on every
+	// refresh, and SQLite's default behaviour under that contention is to fail
+	// the reader immediately with "database is locked" — which surfaced as the
+	// process view dying with a JSON parse error, because the handler returned
+	// that message as plain text.
+	//
+	//   journal_mode(WAL) lets readers proceed during a write instead of
+	//     blocking, which is the actual fix for a read-heavy UI over a
+	//     write-heavy recorder.
+	//   busy_timeout waits for a lock rather than failing instantly. Five
+	//     seconds is far longer than any statement here takes, so in practice
+	//     it converts a hard error into a brief wait.
+	//   synchronous(NORMAL) is the standard companion to WAL: durable across
+	//     application crashes, and we are recording observations, not money.
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+	h, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	// A small pool, NOT a serialised one. The comment here used to claim writes
+	// were serialised, which this line has never done — and setting it to 1
+	// would be the wrong fix. Under WAL a single writer and several readers
+	// proceed concurrently, and the writer is already one goroutine (the
+	// collector); capping at 1 would instead queue the dashboard's reads behind
+	// every write. The cap exists to bound connection count, and busy_timeout
+	// covers the brief overlap when a reader meets a checkpoint.
+	h.SetMaxOpenConns(4)
 	if _, err := h.Exec(schema); err != nil {
 		h.Close()
 		return nil, err
@@ -176,9 +199,15 @@ func (d *DB) RecordConnectionDedup(c Connection, window time.Duration) error {
 		}
 	}
 
+	// bytes_sent/bytes_recv belong in this list. They were missing, and the
+	// driver accepted the two surplus arguments rather than rejecting the
+	// statement, so every flow's FIRST sighting recorded zero bytes. Only
+	// repeat sightings had a volume, because the UPDATE branch above adds to
+	// the column correctly — which made the bug look like "quiet connections
+	// show nothing" instead of what it was.
 	_, err := d.sql.Exec(
-		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country, story)
-		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (ts, last_seen, events, pid, image, remote_ip, remote_port, proto, domain, verdict, inbound, asn, as_org, country, story, bytes_sent, bytes_recv)
+		 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts, ts, c.PID, c.Image, c.RemoteIP,
 		c.RemotePort, c.Proto, nullable(c.Domain), verdict, c.Inbound,
 		c.ASN, nullable(c.ASOrg), nullable(c.Country), nullable(c.Story),

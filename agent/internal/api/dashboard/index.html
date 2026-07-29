@@ -5,188 +5,607 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NiteWatch — Who's Talking?</title>
 <style>
+  /* Two themes, and the dark one is a genuine redesign rather than the old
+     palette with the text turned up.
+
+     The complaint was "dark on dark", and it was right: panels sat at #161c2a
+     on a #0b0e14 page, a difference of about 6% lightness. Nothing looked like
+     a surface, everything looked like one flat sheet with words on it. Panels
+     are now clearly lifted off the page, borders are visible rather than
+     implied, and elevation is carried by shadow as well as colour. */
   :root {
-    --bg: #0b0e14; --panel: #131824; --line: #232a3a; --fg: #e6e9f0;
-    --muted: #8a93a6; --accent: #4da3ff; --new: #ffcf5c;
+    color-scheme: dark;
+    --bg: #0d1220;
+    --bg-2: #0a0e19;
+    --panel: #1b2337;
+    --panel-2: #253049;
+    --line: #38455f;
+    --line-soft: #2a344b;
+    --fg: #f5f8fd;
+    --muted: #bcc7dc;
+    --dim: #94a1ba;
+    --accent: #6cb6ff;
+    --accent-soft: rgba(108,182,255,.14);
+    --accent-ink: #04121f;
+    --new: #ffd36b;
+    --ok: #7ee2a8;
+    --bad: #ff9b9b;
+    --crit: #ff6b6b;
+    --high: #ffab52;
+    --c-blue: #6cb6ff;   --c-blue-soft: rgba(108,182,255,.16);
+    --c-violet: #b391ff; --c-violet-soft: rgba(179,145,255,.16);
+    --c-teal: #5fd7c4;   --c-teal-soft: rgba(95,215,196,.16);
+    --c-amber: #ffc46b;  --c-amber-soft: rgba(255,196,107,.16);
+    --c-rose: #ff9db4;   --c-rose-soft: rgba(255,157,180,.16);
+    --sev-bg: #333d52;      --sev-fg: var(--muted);
+    --sev-crit-bg: #581919;  --sev-crit-fg: #ffb3b3;
+    --sev-high-bg: #55320f;  --sev-high-fg: #ffcb96;
+    --sev-drill-bg: #14344a; --sev-drill-fg: #8fd0ff;
+    --danger-bg: #3a1a1a;    --danger-line: #7a3030;  --danger-fg: #ffc4c4;
+    --fix-bg: #17293e;       --fix-line: #3f5f88;     --fix-fg: #d6e8ff;
+    --warn-bg: #2e2400;      --warn-line: #7a5600;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 18px -8px rgba(0,0,0,.55);
+    --shadow-lg: 0 26px 70px rgba(0,0,0,.6);
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text",
+            "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+    --r: 10px;
+    --ease: cubic-bezier(.2,.7,.3,1);
+  }
+
+  /* Light theme. Not an afterthought — this is the one to use in a lit room,
+     and "dark on dark" is most directly answered by being able to leave. */
+  html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #eef1f7;
+    --bg-2: #e4e9f2;
+    --panel: #ffffff;
+    --panel-2: #f2f5fa;
+    --line: #c8d2e2;
+    --line-soft: #dde4ef;
+    --fg: #0f1626;
+    --muted: #4d586e;
+    --dim: #6b7691;
+    --accent: #0f62c4;
+    --accent-soft: rgba(15,98,196,.10);
+    --accent-ink: #ffffff;
+    --new: #8a5a00;
+    --ok: #17794a;
+    --bad: #b3261e;
+    --crit: #b3261e;
+    --high: #9a5b00;
+    --c-blue: #0f62c4;   --c-blue-soft: rgba(15,98,196,.10);
+    --c-violet: #6b3fd4; --c-violet-soft: rgba(107,63,212,.10);
+    --c-teal: #0a7d6e;   --c-teal-soft: rgba(10,125,110,.10);
+    --c-amber: #9a5b00;  --c-amber-soft: rgba(154,91,0,.12);
+    --c-rose: #b3325a;   --c-rose-soft: rgba(179,50,90,.10);
+    --sev-bg: #e2e8f2;       --sev-fg: #43506b;
+    --sev-crit-bg: #fbe3e1;  --sev-crit-fg: #96150f;
+    --sev-high-bg: #fdeed6;  --sev-high-fg: #854d00;
+    --sev-drill-bg: #dbeaff; --sev-drill-fg: #10508f;
+    --danger-bg: #fdeceb;    --danger-line: #e0a9a4;  --danger-fg: #96150f;
+    --fix-bg: #e8f1fd;       --fix-line: #a9c6e8;     --fix-fg: #0d4f9e;
+    --warn-bg: #fdf4de;      --warn-line: #d9b96a;
+    --shadow: 0 1px 2px rgba(16,26,48,.08), 0 6px 18px -8px rgba(16,26,48,.18);
+    --shadow-lg: 0 26px 70px rgba(16,26,48,.22);
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  a:hover { color: color-mix(in srgb, var(--accent) 78%, var(--fg) 22%); }
+  a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  /* External links are marked, because this page is otherwise entirely local
+     and a click that leaves the machine should not be a surprise. */
+  a.ext-link::after { content: " ↗"; opacity: .7; }
   body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  header { padding: 18px 22px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 14px; }
-  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
-  header .tag { color: var(--muted); font-size: 13px; }
-  .wrap { padding: 22px; max-width: 1100px; margin: 0 auto; }
-  .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 14px 16px; min-width: 150px; }
-  .card .n { font-size: 24px; font-weight: 600; }
-  .card .l { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-  .controls { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  select { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 8px; color: var(--fg); font-size: 13px; }
-  input[type=search] { flex: 1 1 320px; padding: 10px 12px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-size: 14px; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 10px 14px;
-    font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
+    font: 500 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility; }
+  /* Ambient depth so the page doesn't read as a flat black rectangle. */
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(1000px 520px at 50% -160px, var(--accent-soft), transparent 72%); }
+  header, .wrap { position: relative; z-index: 1; }
+
+  /* flex-wrap is load-bearing, not cosmetic. Without it the header's buttons
+     could not fit on a narrow window, so they pushed the header to their own
+     combined width — and because the header is a block in normal flow, that
+     widened the whole document. Every alert below then rendered against a page
+     wider than the screen, which read as "the alerts overflow" when the actual
+     cause was four buttons in a row that would not break. */
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 20; }
+  header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+    height: 2px; background: linear-gradient(90deg, var(--c-blue), var(--c-violet) 34%,
+      var(--c-teal) 68%, var(--c-amber)); opacity: .75; }
+  header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
+  header .tag { color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) { header .tag { display: none; } }
+  /* The table is the product, and it has eleven columns. A 1140px cap left
+     430px of empty page on either side of a 2000px display while clipping
+     Country, Type, Direction, Sent, Received and Activity off the right-hand
+     edge — the columns somebody opens this to read. The cap is now wide enough
+     for the whole table, and prose is constrained separately below so that
+     widening the page does not produce 200-character lines. */
+  .wrap { padding: 24px; max-width: 1720px; margin: 0 auto; }
+
+  /* ── buttons: solid, obviously pressable, big enough to hit ───────── */
+  .btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--fg);
+    box-shadow: var(--shadow);
+    padding: 10px 16px; border-radius: var(--r); font: 600 14px/1.2 var(--sans);
+    cursor: pointer; min-height: 40px; display: inline-flex; align-items: center;
+    gap: 7px; transition: background .16s var(--ease), border-color .16s var(--ease),
+    transform .12s var(--ease); }
+  .btn:hover { background: var(--panel-2); border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: .5; cursor: default; transform: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 84%, white 16%);
+    border-color: color-mix(in srgb, var(--accent) 84%, white 16%); }
+  .btn.danger { background: var(--danger-bg); border-color: var(--danger-line);
+    color: var(--danger-fg); }
+  .btn.danger:hover { border-color: var(--bad);
+    background: color-mix(in srgb, var(--danger-bg) 82%, var(--bad) 18%); }
+
+  .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 20px; min-width: 156px; flex: 0 1 220px; box-shadow: var(--shadow);
+    transition: border-color .18s var(--ease), transform .18s var(--ease),
+                box-shadow .18s var(--ease); }
+  .card:hover { transform: translateY(-3px);
+    box-shadow: var(--shadow), 0 0 0 3px var(--card-soft, var(--accent-soft)); }
+  .card { position: relative; overflow: hidden; }
+  /* A hairline of the card's own colour along the top edge. */
+  .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: var(--card-hue, var(--accent)); opacity: .9; }
+  .card:nth-child(1) { --card-hue: var(--c-blue);   --card-soft: var(--c-blue-soft); }
+  .card:nth-child(2) { --card-hue: var(--c-violet); --card-soft: var(--c-violet-soft); }
+  .card:nth-child(3) { --card-hue: var(--c-teal);   --card-soft: var(--c-teal-soft); }
+  .card:hover { border-color: var(--card-hue); }
+  .card .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; color: var(--card-hue, var(--fg)); }
+  .card .l { color: var(--muted); font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .07em; margin-top: 2px; }
+
+  .controls { margin-bottom: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  select, input[type=search] { padding: 11px 14px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--r); color: var(--fg);
+    font: 500 15px var(--sans); min-height: 44px; }
+  input[type=search] { flex: 1 1 320px; }
+  select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r);
+    overflow: hidden; }
+  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 11px 16px;
+    font: 600 14px var(--sans); cursor: pointer; border-right: 1px solid var(--line);
+    min-height: 44px; transition: background .16s var(--ease), color .16s var(--ease); }
   .seg button:last-child { border-right: 0; }
-  .seg button.on { background: var(--accent); color: #05121f; font-weight: 600; }
-  .flag { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 11px;
-    font-weight: 600; letter-spacing: .3px; background: #3a1c1c; color: #ff8f8f;
-    border: 1px solid #6a2a2a; margin-left: 6px; }
+  .seg button:hover { color: var(--fg); background: var(--panel-2); }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); }
+
+  .flag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px;
+    font-weight: 700; letter-spacing: .04em; background: var(--sev-crit-bg);
+    color: var(--sev-crit-fg); border: 1px solid var(--danger-line);
+    margin-left: 8px; vertical-align: 1px; }
   td.owner { color: var(--fg); }
-  td.cc { font-variant: small-caps; letter-spacing: .5px; }
+  td.cc { font-variant: small-caps; letter-spacing: .04em; }
+  td.cc span { background: var(--c-teal-soft); color: var(--c-teal);
+    padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 13px; }
+  td.dir .out { color: var(--dim); }
+  td.dir .in { background: var(--c-amber-soft); color: var(--c-amber);
+    padding: 2px 8px; border-radius: 6px; font-weight: 700; }
+  td.proto span { background: var(--panel-2); color: var(--muted); padding: 2px 8px;
+    border-radius: 6px; font-size: 12.5px; font-weight: 700; letter-spacing: .03em; }
+  td.owner { color: var(--c-violet); font-weight: 600; }
   td.num { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel);
-    min-width: 900px; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase;
-    letter-spacing: .5px; cursor: pointer; user-select: none; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); min-width: 0; }
+  th, td { text-align: left; padding: 13px 15px; border-bottom: 1px solid var(--line-soft);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
+    font-size: 15px; }
+  th { color: var(--muted); font-weight: 700; font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .07em; cursor: pointer; user-select: none;
+    background: var(--panel-2); position: sticky; top: 0;
+    border-bottom: 2px solid var(--line); }
   th:hover { color: var(--fg); }
-  th .arrow { opacity: .45; font-size: 10px; margin-left: 4px; }
+  th .arrow { opacity: .5; font-size: 11px; margin-left: 5px; }
   th.sorted { color: var(--accent); }
   th.sorted .arrow { opacity: 1; }
   tr:last-child td { border-bottom: none; }
-  td.domain { color: var(--accent); }
+  td.domain { color: var(--accent); font-weight: 600; }
   td.raw { color: var(--muted); font-style: italic; }
-  .empty { color: var(--muted); padding: 30px; text-align: center; }
-  .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
-  .banner { display: none; margin: 0 0 18px; padding: 12px 16px; border-radius: 10px;
-    border: 1px solid #6a4a00; background: #2a2000; color: var(--new); }
+  .empty { color: var(--muted); padding: 34px; text-align: center; font-size: 15px; }
+  .foot { color: var(--muted); font-size: 13.5px; margin-top: 16px; line-height: 1.65;
+    max-width: 110ch; }
+
+  .banner { display: none; margin: 0 0 20px; padding: 15px 18px; border-radius: 12px;
+    border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--new);
+    font-size: 15px;
+    max-width: 110ch; }
   .banner.show { display: block; }
-  .banner b { color: #fff; }
-  .tools { margin-left: auto; display: flex; gap: 8px; }
-  .btn { background: var(--panel); border: 1px solid var(--line); color: var(--fg);
-    padding: 7px 13px; border-radius: 8px; font-size: 13px; cursor: pointer; }
-  .btn:hover { border-color: var(--accent); }
+  .banner b { color: var(--fg); }
+  .tools { margin-left: auto; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  /* On a phone the controls get their own row rather than competing with the
+     wordmark for space. */
+  @media (max-width: 720px) {
+    header { padding: 14px 16px; gap: 10px; }
+    .tools { margin-left: 0; width: 100%; }
+    .tools .btn, .tools .toggle { flex: 1 1 auto; justify-content: center; }
+    .wrap { padding: 16px; }
+  }
+
   .panel { display: none; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px 18px; margin-bottom: 18px; }
-  .panel.show { display: block; }
-  .panel h2 { margin: 0 0 4px; font-size: 15px; }
-  .panel .hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
-  .opt { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+    border-radius: 14px; padding: 20px 22px; margin-bottom: 20px;
+    box-shadow: var(--shadow); }
+  .panel.show { display: block; animation: drop .28s var(--ease); }
+  .panel h2 { margin: 0 0 5px; font-size: 18px; font-weight: 700; }
+  .panel .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 100ch; }
+  .opt { display: flex; align-items: flex-start; gap: 14px; padding: 13px 0;
     border-top: 1px solid var(--line); }
   .opt:first-of-type { border-top: 0; }
-  .opt label { font-weight: 500; }
-  .opt .d { color: var(--muted); font-size: 12px; }
-  .opt input[type=number] { width: 90px; padding: 6px 8px; background: var(--bg);
-    border: 1px solid var(--line); border-radius: 6px; color: var(--fg); }
+  .opt label { font-weight: 600; font-size: 15.5px; cursor: pointer; }
+  .opt .d { color: var(--muted); font-size: 14px; margin-top: 3px; max-width: 100ch; }
+  .opt input[type=number] { width: 104px; padding: 9px 11px; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; color: var(--fg);
+    font: 500 15px var(--sans); }
   .opt .ctl { margin-left: auto; }
-  .saved { color: #7ddc9a; font-size: 12px; margin-left: 10px; }
+  /* Checkboxes were 13px system defaults — impossible to hit and hard to read. */
+  input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+  .saved { color: var(--ok); font-size: 14px; margin-left: 12px; font-weight: 600; }
+
+  tr.grouphead { cursor: pointer; }
+  tr.grouphead > td { background: var(--panel-2); font-size: 15px; padding: 12px 15px;
+    white-space: normal; max-width: none; }
+  tr.grouphead:hover > td { background: var(--accent-soft); }
+  tr.grouphead .tw { color: var(--accent); margin-right: 12px; font-size: 19px;
+    display: inline-block; width: 18px; line-height: 1; text-align: center;
+    transition: transform .18s ease, color .18s ease; }
+tr.grouphead:hover .tw { color: var(--fg); }
+/* One glyph that turns, rather than two that swap. The rotation is what
+   tells you the row opened; swapping ▸ for ▾ says the same thing without
+   the motion that makes it obvious which row you just hit. */
+tr.grouphead.open .tw { transform: rotate(90deg); }
+  tr.grouphead .gname { font-weight: 700; color: var(--accent); cursor: pointer; }
+  tr.grouphead .gname:hover { text-decoration: underline; }
+  tr.grouphead .gname::after { content: " ›"; opacity: .75; font-size: 17px;
+    font-weight: 700; }
+  tr.grouphead .gmeta { color: var(--muted); font-size: 13.5px; margin-left: 12px; }
+  tr.grouphead .gbytes { color: var(--muted); font-size: 13.5px; margin-left: 14px;
+    font-variant-numeric: tabular-nums; }
+  tr.grouphead > td { position: sticky; left: 0; }
+  tr.grouphead.open > td { border-bottom-color: var(--accent); }
+  /* Children are indented and quieter, so the eye reads groups first. */
+  tr.child > td:first-child { padding-left: 34px; }
+  tr.child > td { font-size: 14.5px; }
+  /* The program cell is blanked for children, so its affordance chevron would
+     be a lone "›" pointing at nothing. */
+  tr.child td.proc::after { content: none; }
+  .btn.on { border-color: var(--accent); color: var(--accent); }
   tr.clickable { cursor: pointer; }
-  tr.clickable:hover td { background: #1a2130; }
-  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
-    align-items: center; justify-content: center; padding: 20px; z-index: 10; }
-  .modal.show { display: flex; }
+  tr.clickable:hover td { background: var(--accent-soft); }
+
+  .modal { display: none; position: fixed; inset: 0; background: rgba(4,8,18,.66);
+    align-items: center; justify-content: center; padding: 20px; z-index: 40;
+    backdrop-filter: blur(3px); }
+  .modal.show { display: flex; animation: fade .2s var(--ease); }
   .modal .box { background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; max-width: 720px; width: 100%; max-height: 85vh;
-    overflow: auto; padding: 20px 22px; }
-  .tale { font-size: 14px; line-height: 1.6; color: #e8edf6; margin: 14px 0 0;
-    padding: 14px 16px; background: #0e1420; border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0; }
-  .stepstoggle { margin-top: 12px; font-size: 12px; color: var(--muted);
-    cursor: pointer; user-select: none; }
-  .stepstoggle:hover { color: var(--fg); }
-  .chain { list-style: none; margin: 14px 0 0; padding: 0; }
-  .chain li { position: relative; padding: 0 0 18px 26px; border-left: 2px solid var(--line); }
+    border-radius: 16px; max-width: 760px; width: 100%; max-height: 86vh;
+    overflow: auto; padding: 24px 26px; box-shadow: var(--shadow-lg);
+    animation: rise .26s var(--ease); }
+  .modal h2 { font-size: 19px; font-weight: 700; }
+
+  .tale { font-size: 16.5px; line-height: 1.72; color: var(--fg); margin: 16px 0 0;
+    padding: 16px 18px; background: var(--bg-2); border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0; }
+  /* Quote-able build identity. A bug report that does not say which build it
+     came from costs more to act on than it is worth, and "check the log file"
+     is not a thing most people will do. */
+  .buildid { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; user-select: all; }
+  .footdocs { margin-top: 12px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .footdocs a { font-weight: 600; font-size: 14px; }
+  .stepstoggle { margin-top: 14px; font-size: 15px; color: var(--accent);
+    cursor: pointer; user-select: none; font-weight: 600; }
+  /* The arrow is CSS rather than part of the label, so it can be sized
+     independently of the words and turned instead of swapped. */
+  .stepstoggle::before { content: "▸"; display: inline-block; font-size: 19px;
+    line-height: 1; width: 16px; margin-right: 6px; vertical-align: -2px;
+    transition: transform .18s ease; }
+  .stepstoggle.open::before { transform: rotate(90deg); }
+  .stepstoggle:hover { text-decoration: underline; }
+  .chain { list-style: none; margin: 16px 0 0; padding: 0; }
+  .chain li { position: relative; padding: 0 0 20px 28px; border-left: 2px solid var(--line); }
   .chain li:last-child { border-left-color: transparent; padding-bottom: 0; }
-  .chain li::before { content: ""; position: absolute; left: -7px; top: 4px;
-    width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
-  .chain .k { font-weight: 600; }
-  .chain .s { color: var(--accent); }
-  .chain .d { color: var(--muted); font-size: 12px; }
-  .alerts { margin-bottom: 20px; }
-  .alert { border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px;
-    background: var(--panel); padding: 13px 16px; margin-bottom: 10px; }
-  .alert.critical { border-left-color: #ff5f5f; }
-  .alert.high     { border-left-color: #ff9f43; }
-  .alert.medium   { border-left-color: #ffcf5c; }
-  .alert.low      { border-left-color: #6b7a90; }
-  .alert h3 { margin: 0 0 6px; font-size: 14px; }
-  .alert .when { float: right; color: var(--muted); font-size: 11px; font-weight: 400; }
-  .alert .stale { color: #ffcf5c; }
-  .alert .sev { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .6px;
-    text-transform: uppercase; padding: 2px 7px; border-radius: 4px; margin-right: 8px;
-    background: #2a2f3d; color: var(--muted); vertical-align: 2px; }
-  .alert.critical .sev { background: #4a1414; color: #ff8f8f; }
-  .alert.high .sev     { background: #45280c; color: #ffb87a; }
-  .alert p { margin: 0 0 10px; color: #cfd6e4; font-size: 13px; white-space: pre-wrap; }
-  .alert ol { margin: 0; padding-left: 20px; color: #cfd6e4; font-size: 13px; }
-  .alert ol li { margin-bottom: 4px; }
-  .alert .act { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .alert .fix { border-color: #3d5a80; background: #16283d; color: #cfe4ff; }
-  .alert .fix:hover { border-color: var(--accent); }
-  .alert .fix.hard { border-color: #6a2a2a; background: #2a1414; color: #ffb3b3; }
-  .prog { margin: 8px 0 0; font-size: 12px; font-family: ui-monospace, monospace;
-    color: #cfd6e4; word-break: break-all; }
-  .prog .k { color: var(--muted); font-family: inherit; }
-  .prog .odd { color: var(--new); }
-  .cause { margin: 10px 0 0; padding: 10px 12px; background: #0e1420;
-    border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
-  .cause h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase;
-    letter-spacing: .5px; color: var(--muted); font-weight: 600; }
-  .cause .lin { color: var(--accent); font-family: ui-monospace, monospace; font-size: 12px; }
-  .cause ul { margin: 8px 0 0; padding-left: 18px; color: #cfd6e4; }
+  .chain li::before { content: ""; position: absolute; left: -8px; top: 4px;
+    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(108,182,255,.16); }
+  .chain .k { font-weight: 700; }
+  .chain .s { color: var(--accent); font-weight: 600; }
+  .chain .d { color: var(--muted); font-size: 14px; font-family: var(--mono); }
+
+  .alerts { margin-bottom: 22px; display: grid; gap: 12px; min-width: 0; }
+  .alert { border: 1px solid var(--line); border-left-width: 6px; border-radius: 14px;
+    background: var(--panel); padding: 17px 20px; box-shadow: var(--shadow);
+    animation: rise .34s var(--ease) both;
+    /* min-width:0 is required, not tidy-up. A grid item defaults to
+       min-width:auto, meaning it refuses to shrink below its content's
+       min-content width — and because the narrative uses white-space:pre-wrap,
+       that width is its longest unbroken line. The card therefore grew past its
+       own grid track and pushed the page wider than the screen. Zero lets the
+       track constrain it, after which pre-wrap wraps normally. */
+    min-width: 0; }
+  .alert.critical { border-left-color: var(--crit); }
+  .alert.high     { border-left-color: var(--high); }
+  .alert.medium   { border-left-color: var(--new); }
+  .alert.low      { border-left-color: var(--dim); }
+  .alert h3 { margin: 0 0 9px; font-size: 17px; font-weight: 700; line-height: 1.35; }
+  .alert .when { float: right; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .alert .stale { color: var(--new); }
+  .alert .sev { display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .08em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 6px; margin-right: 10px;
+    background: var(--sev-bg); color: var(--sev-fg); vertical-align: 2px; }
+  .alert.critical .sev { background: var(--sev-crit-bg); color: var(--sev-crit-fg); }
+  .alert.high .sev     { background: var(--sev-high-bg); color: var(--sev-high-fg); }
+  /* Line length is capped independently of the page, because a comfortable
+     measure is about 75-90 characters regardless of how wide the monitor is. */
+  .alert p { margin: 0 0 12px; color: var(--fg); font-size: 15.5px; white-space: pre-wrap;
+    line-height: 1.65; max-width: 95ch; overflow-wrap: anywhere; }
+  .alert ol { margin: 0; padding-left: 22px; color: var(--fg); font-size: 15.5px;
+    max-width: 95ch; overflow-wrap: anywhere; }
+  .alert ol li { margin-bottom: 7px; line-height: 1.6; }
+  .alert .act { margin-top: 14px; display: flex; gap: 9px; flex-wrap: wrap; }
+  .alert .fix { border-color: var(--fix-line); background: var(--fix-bg); color: var(--fix-fg); }
+  .alert .fix:hover { border-color: var(--accent);
+    background: color-mix(in srgb, var(--fix-bg) 80%, var(--accent) 20%); }
+  .alert .fix.hard { border-color: var(--danger-line); background: var(--danger-bg);
+    color: var(--danger-fg); }
+  .alert .fix.hard:hover { border-color: var(--bad);
+    background: color-mix(in srgb, var(--danger-bg) 82%, var(--bad) 18%); }
+  .alert.acked { opacity: .58; }
+  /* A drill is visibly a drill, everywhere, always. */
+  .sev.drill { background: var(--sev-drill-bg); color: var(--sev-drill-fg);
+    border: 1px solid var(--sev-drill-fg); }
+  .alert.drill { border-left-color: var(--accent) !important;
+    background: repeating-linear-gradient(135deg, var(--panel), var(--panel) 14px,
+      var(--bg-2) 14px, var(--bg-2) 28px); }
+
+  .prog { margin: 10px 0 0; font-size: 13.5px; font-family: var(--mono);
+    color: var(--fg); word-break: break-all; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 9px; padding: 10px 13px; line-height: 1.55; }
+  .prog .k { color: var(--muted); font-family: var(--sans); font-weight: 600; }
+  .prog .odd { color: var(--new); font-family: var(--sans); }
+  .prog .proglink { cursor: pointer; text-decoration: underline;
+    text-underline-offset: 3px; text-decoration-color: var(--dim); }
+  .prog .proglink:hover { color: var(--accent); text-decoration-color: var(--accent); }
+  .alert .btn.trace { border-color: var(--fix-line); background: var(--fix-bg);
+    color: var(--fix-fg); }
+  .alert .btn.trace:hover { border-color: var(--accent); }
+
+  .cause { margin: 12px 0 0; padding: 13px 15px; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  .cause h4 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+  .cause .lin { color: var(--accent); font-family: var(--mono); font-size: 13.5px;
+    overflow-wrap: anywhere; }
+  .cause ul { margin: 9px 0 0; padding-left: 20px; color: var(--fg);
+    overflow-wrap: anywhere; }
+  .cause li { margin-bottom: 4px; }
   .cause .cnt { color: var(--muted); }
-  .cause .note { color: var(--muted); margin-top: 8px; font-size: 11px; }
-  .actmsg { font-size: 12px; margin-top: 8px; color: #7ddc9a; }
-  .actmsg.bad { color: #ff9f9f; }
-  .alert.acked { opacity: .55; }
-  /* Clickable things must LOOK clickable. The causal data was previously
-     reachable only by guessing that rows respond to a click. */
-  td.proc { color: var(--accent); cursor: pointer; }
+  .cause .note { color: var(--muted); margin-top: 10px; font-size: 13px; line-height: 1.55; }
+  .actmsg { font-size: 14px; margin-top: 10px; color: var(--ok); font-weight: 600; }
+  .actmsg.bad { color: var(--bad); }
+
+  td.proc { color: var(--accent); cursor: pointer; font-weight: 600; }
   td.proc:hover { text-decoration: underline; }
-  td.proc::after { content: " ›"; opacity: .5; }
-  .pstat { display: flex; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px;
-    padding: 12px 14px; background: #0e1420; border: 1px solid var(--line); border-radius: 8px; }
-  .pstat div .n { font-size: 18px; font-weight: 600; }
-  .pstat div .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .psec { margin-top: 18px; }
-  .psec h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
-    color: var(--muted); margin: 0 0 8px; }
-  .plist { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-  .plist li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 10px; }
+  td.proc::after { content: " ›"; opacity: .6; }
+
+  .pstat { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0 4px;
+    padding: 15px 18px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; }
+  .pstat div .n { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pstat div .l { font-size: 12.5px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .07em; font-weight: 600; }
+  .psec { margin-top: 22px; }
+  .psec h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 700; }
+  .plist { list-style: none; margin: 0; padding: 0; font-size: 15px; }
+  .plist li { padding: 9px 0; border-bottom: 1px solid var(--line); display: flex;
+    gap: 12px; flex-wrap: wrap; }
   .plist li:last-child { border-bottom: none; }
-  .plist .g { color: var(--muted); margin-left: auto; white-space: nowrap; }
-  .why { color: var(--muted); font-size: 12px; margin-top: 16px;
-    border-top: 1px solid var(--line); padding-top: 12px; }
-  /* Registration lookup. Deliberately set apart from everything else on the
-     page, because everything else is answered from this machine alone and this
-     one is not. The warning is part of the control, not a footnote. */
-  .lookup { margin-top: 14px; }
-  .lookup .ext { display: block; color: var(--muted); font-size: 11px; margin-top: 6px;
-    max-width: 62ch; line-height: 1.5; }
-  .lookup .btn.ext-btn { border-color: #4a5a7a; }
-  .lookup .res { margin-top: 12px; padding: 12px 14px; background: #0e1420;
-    border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  .plist .g { color: var(--muted); margin-left: auto; font-size: 14px; }
+  .why { color: var(--muted); font-size: 13.5px; margin-top: 18px;
+    border-top: 1px solid var(--line); padding-top: 14px; line-height: 1.6; }
+
+  .lookup { margin-top: 16px; }
+  .lookup .ext { display: block; color: var(--muted); font-size: 13.5px; margin-top: 8px;
+    max-width: 62ch; line-height: 1.6; }
+  .lookup .btn.ext-btn { border-color: var(--accent); }
+  .lookup .res { margin-top: 14px; padding: 15px 17px; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 10px; font-size: 14.5px; }
   .lookup .res dl { display: grid; grid-template-columns: max-content 1fr;
-    gap: 4px 14px; margin: 0; }
-  .lookup .res dt { color: var(--muted); font-size: 11px; text-transform: uppercase;
-    letter-spacing: .5px; padding-top: 2px; }
+    gap: 7px 18px; margin: 0; }
+  .lookup .res dt { color: var(--muted); font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: .06em; padding-top: 2px; font-weight: 700; }
   .lookup .res dd { margin: 0; overflow-wrap: anywhere; }
-  .lookup .res .note { margin: 0 0 10px; color: #ffd48a; }
+  .lookup .res .note { margin: 0 0 12px; color: var(--new); line-height: 1.6; }
   .lookup .res .note.old { color: var(--muted); }
-  .lookup .res .src { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
-  .lookup .err { margin-top: 10px; color: #ff9f9f; font-size: 12px; }
-  /* Per-destination lookup inside the process view. */
-  .plist .lk { background: none; border: 1px solid var(--line); color: var(--muted);
-    border-radius: 5px; font-size: 11px; padding: 1px 7px; cursor: pointer; margin-left: 8px; }
-  .plist .lk:hover { color: var(--fg); border-color: var(--accent); }
-  .plist li { flex-wrap: wrap; }
+  .lookup .res .src { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+  .lookup .err { margin-top: 12px; color: var(--bad); font-size: 14px; }
+  .plist .lk { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 7px; font: 600 13px var(--sans); padding: 5px 11px; cursor: pointer;
+    margin-left: 10px; min-height: 32px; }
+  .plist .lk:hover { color: var(--fg); border-color: var(--accent); background: var(--panel-2); }
   .plist .lkres { flex-basis: 100%; }
+
+  /* ── plain-English help ───────────────────────────────────────────── */
+  /* Off by default: an experienced user should never be bombarded with these. */
+  .whatis { color: var(--muted); font-size: 14.5px; margin: 6px 0 0; line-height: 1.6; }
+  .whatis b { color: var(--fg); font-weight: 700; }
+  body:not(.plain) .plain-only { display: none !important; }
+  /* A dotted underline on a defined term, only in plain mode. */
+  body.plain .term { border-bottom: 2px dotted var(--dim); cursor: help; }
+  body.plain .term:hover { border-bottom-color: var(--accent); color: var(--fg); }
+  .collist { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px 22px; }
+  .collist label { display: flex; align-items: center; gap: 10px; cursor: pointer;
+    font-weight: 600; font-size: 15px; padding: 6px 0; }
+  .collist label.locked { opacity: .55; cursor: default; }
+  .collist .why { border: 0; padding: 0; margin: 0; font-size: 13px; color: var(--dim); }
+  /* The disclaimer sits above everything, including other modals, and has no
+     backdrop click-to-close: the only ways out are the two buttons. */
+  .modal.terms { z-index: 200; background: rgba(4,8,18,.88); }
+  .modal.terms .box { max-width: 760px; }
+  .termsbody { font-size: 16px; line-height: 1.72; color: var(--fg); }
+  .termsbody p { margin: 0 0 14px; }
+  .termsbody strong { color: var(--accent); }
+  .termsbody a { font-weight: 600; }
+  .termsformal { white-space: pre-wrap; font: 400 12.5px/1.6 var(--mono);
+    color: var(--muted); background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0 0; max-height: 40vh;
+    overflow: auto; }
+  .termsact { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+  /* The buttons stay pinned and the text scrolls under them. On a short
+     window the ask is longer than the viewport, and letting the dismiss
+     button fall below the fold is the exact trick this notice claims not to
+     use — "you have to scroll to find the way out" is a dark pattern whether
+     or not it was intended as one. */
+  .tipmodal .box { max-width: 700px; display: flex; flex-direction: column; overflow: hidden; }
+  .tipmodal h2, .tipact, .tipmodal #tip-note { flex: none; }
+  .tipmodal #tip-body { overflow-y: auto; min-height: 0; }
+  /* A rule and a little breathing room, so the pinned footer reads as a
+     footer rather than as text that has been abruptly cut off. */
+  .tipmodal .tipact { border-top: 1px solid var(--line); padding-top: 16px; }
+  .tipact { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .tipact .btn { text-decoration: none; }
+  /* Nothing behind the notice is usable until it is answered. */
+  /* The help modal is excluded too: the notice links to it, so it has to be
+     readable and clickable while the notice is still up. Blurring it made the
+     documents unreadable and pointer-events:none made the tabs dead — which
+     testing by calling .click() directly did not catch, because that bypasses
+     hit-testing entirely. */
+  body.locked > *:not(#terms-modal):not(#help-modal) { filter: blur(3px);
+    pointer-events: none; user-select: none; }
+  /* The embedded document. Deliberately narrow-measure: it is prose, and the
+     modal is wide enough for a table. */
+  .doc { font-size: 15.5px; line-height: 1.7; max-width: 82ch; }
+  .doc h1 { font-size: 21px; margin: 0 0 12px; }
+  .doc h2 { font-size: 18px; margin: 26px 0 10px; color: var(--accent);
+    border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .doc h3 { font-size: 16px; margin: 20px 0 8px; }
+  .doc p { margin: 0 0 12px; color: var(--fg); }
+  .doc ul { margin: 0 0 14px; padding-left: 22px; }
+  .doc li { margin-bottom: 8px; color: var(--fg); }
+  .doc code { font-family: var(--mono); font-size: 13.5px; background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+  .doc strong { color: var(--accent); }
+  .doc hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+  .askbox { width: 100%; height: 34vh; resize: vertical; background: var(--bg-2);
+    color: var(--fg); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; font: 400 13px/1.6 var(--mono); }
+  .askbox:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .gloss { display: grid; gap: 16px; }
+  .gloss dt { font-weight: 700; font-size: 16px; color: var(--accent); }
+  .gloss dd { margin: 4px 0 0; color: var(--fg); font-size: 15px; line-height: 1.65; }
+  .toggle { display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+    font-weight: 600; font-size: 14px; color: var(--muted); user-select: none; }
+  .toggle:hover { color: var(--fg); }
+  .toggle input { width: 20px; height: 20px; }
+
+  /* ── motion ───────────────────────────────────────────────────────
+     The previous animations only played when an element was created, and once
+     the table started reusing nodes that meant almost nothing ever moved. The
+     motion here is driven by DATA CHANGES instead, which makes it useful as
+     well as visible: a row that slides in is a connection that just happened,
+     and a cell that flashes is a number that just went up. Nothing animates
+     decoratively on a timer. */
+  @keyframes fade { from { opacity: 0 } }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) } }
+  @keyframes drop { from { opacity: 0; transform: translateY(-8px) } }
+
+  /* A connection appearing for the first time. */
+  @keyframes rowIn {
+    0%   { opacity: 0; transform: translateY(-6px); }
+    100% { opacity: 1; transform: none; }
+  }
+  @keyframes rowTint {
+    0%, 35% { background: var(--accent-soft); }
+    100%    { background: transparent; }
+  }
+  tr.is-new { animation: rowIn .32s var(--ease); }
+  tr.is-new td { animation: rowTint 1.6s var(--ease); }
+
+  /* A value that just changed — bytes ticking up, activity counting on. */
+  @keyframes cellFlash {
+    0%   { color: var(--accent); transform: translateY(-2px); }
+    100% { color: inherit; transform: none; }
+  }
+  td.changed { animation: cellFlash .9s var(--ease); }
+
+  /* The headline counters, when they move. */
+  @keyframes statPop {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.14); color: var(--accent); }
+    100% { transform: scale(1); }
+  }
+  .card .n.bumped { animation: statPop .5s var(--ease); }
+
+  /* Live telemetry, so the page reads as alive rather than frozen. */
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-soft); }
+    50%      { opacity: .55; box-shadow: 0 0 0 6px transparent; }
+  }
+  .livedot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--ok); margin-right: 9px; vertical-align: 1px;
+    animation: livePulse 2.4s ease-in-out infinite; }
+  .livedot.off { background: var(--dim); animation: none; }
+
+  /* Theme switch: colours cross-fade instead of snapping. */
+  body, .card, .panel, .alert, .btn, table, th, td, .tablewrap, .modal .box {
+    transition: background-color .28s var(--ease), color .28s var(--ease),
+                border-color .28s var(--ease);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>NiteWatch</h1>
-  <span class="tag">Who's talking? — outbound connection ledger</span>
-  <div class="tools"><button class="btn" id="settings-btn">Settings</button></div>
+  <span class="tag"><span class="livedot off" id="livedot"></span><span id="livetext">Starting…</span></span>
+  <div class="tools">
+    <button class="btn" id="theme-btn" title="Switch between light and dark"
+      aria-label="Switch between light and dark">🌙</button>
+    <label class="toggle" title="Explain programs and technical words in plain English">
+      <input type="checkbox" id="plain-toggle">
+      Explain everything
+    </label>
+    <button class="btn plain-only" id="gloss-btn">What do these words mean?</button>
+    <button class="btn" id="help-btn"
+      title="Known bugs and limitations, and the roadmap — both built into this build">Limits &amp; roadmap</button>
+    <button class="btn" id="group-btn" title="Group connections by program, or list them flat">Grouped</button>
+    <button class="btn" id="cols-btn" title="Choose which columns to show">Columns</button>
+    <button class="btn" id="test-btn" title="Show every kind of warning this can raise, so you can see it working">Test me</button>
+    <button class="btn" id="tip-btn" title="NiteWatch is free. If it earns its keep.">Tip the author</button>
+    <button class="btn" id="settings-btn">Settings</button>
+  </div>
 </header>
 <div class="wrap">
   <div id="banner" class="banner"></div>
+
+  <div id="columns" class="panel">
+    <h2>Columns</h2>
+    <p class="hint">Show only what you need. A narrow window cannot fit all eleven,
+      and scrolling sideways to read a table is nobody's idea of a good time.
+      Your choice is remembered on this computer.</p>
+    <div id="col-list" class="collist"></div>
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" id="col-all">Show all</button>
+      <button class="btn" id="col-essentials">Just the essentials</button>
+      <button class="btn primary" id="col-close">Done</button>
+    </div>
+  </div>
 
   <div id="settings" class="panel">
     <h2>Settings</h2>
@@ -216,6 +635,21 @@
         <div class="d">How long connection history is retained.</div></div>
       <div class="ctl"><input type="number" id="s-retention" min="1" max="3650"></div>
     </div>
+    <div class="opt">
+      <div><label for="s-vtkey">VirusTotal key (optional)</label>
+        <div class="d">Switches on "Check against antivirus engines" in the program view.
+          Without one, that check does not appear.
+          <b>Stored on this machine only, and never shown again once saved.</b>
+          <br><a class="ext-link" href="https://www.virustotal.com/gui/join-us"
+            target="_blank" rel="noopener noreferrer">Get a free key</a> —
+          sign up, then copy the key from
+          <a class="ext-link" href="https://www.virustotal.com/gui/my-apikey"
+            target="_blank" rel="noopener noreferrer">your API key page</a>.
+          Takes about a minute. (These open virustotal.com in your browser.)</div></div>
+      <div class="ctl"><input type="password" id="s-vtkey" placeholder="Not set"
+        autocomplete="off" style="width:220px;padding:9px 11px;background:var(--bg);
+        border:1px solid var(--line);border-radius:8px;color:var(--fg);font:500 14px var(--sans)"></div>
+    </div>
     <div style="margin-top:14px">
       <button class="btn" id="s-save">Save</button><span class="saved" id="s-saved" hidden>Saved</span>
     </div>
@@ -241,12 +675,12 @@
   <table>
     <thead><tr id="thead">
       <th data-k="lastSeen">Last seen</th>
-      <th data-k="image">Process</th>
-      <th data-k="domain">Destination</th>
-      <th data-k="remoteIP">IP:Port</th>
-      <th data-k="asOrg" title="Who owns the address block (autonomous system)">Owner</th>
+      <th data-k="image" data-term="process">Program</th>
+      <th data-k="domain" data-term="domain">Destination</th>
+      <th data-k="remoteIP" data-term="ip">IP:Port</th>
+      <th data-k="asOrg" data-term="asn" title="Who owns the address block (autonomous system)">Owner</th>
       <th data-k="country" title="Country the address block is registered to">Country</th>
-      <th data-k="proto">Proto</th>
+      <th data-k="proto" data-term="tcp">Type</th>
       <th data-k="inbound" title="Outbound = this PC contacted them. Inbound = they contacted this PC.">Dir</th>
       <th data-k="bytesSent" title="How much this PC SENT to that destination. Volume is visible even when the contents are encrypted.">Sent</th>
       <th data-k="bytesRecv" title="How much this PC received">Received</th>
@@ -259,13 +693,136 @@
   <div class="foot"><b>Click a program name</b> for everything it is doing —
     what started it, everywhere it talks, how much it sends.
     <b>Click anywhere else in a row</b> for the chain of events behind that one
-    connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.</div>
+    connection. Local only — this page and its data never leave your machine. Auto-refreshes every 5s.
+    <div class="footdocs">
+      <a href="#" id="foot-limits">Known bugs &amp; limitations</a>
+      <a href="#" id="foot-roadmap">Roadmap — what is coming</a>
+      <a href="#" id="foot-terms">The disclaimer you accepted</a>
+      <a href="#" id="foot-tip">Tip the author</a>
+    </div></div>
+</div>
+
+<!-- Shown before anything else, and not dismissible except by deciding. -->
+<div class="modal terms" id="terms-modal">
+  <div class="box">
+    <h2 id="terms-headline"></h2>
+    <div id="terms-plain" class="termsbody"></div>
+    <div class="stepstoggle" id="terms-toggle">Show the formal wording</div>
+    <pre id="terms-formal" class="termsformal" hidden></pre>
+    <p class="hint" style="margin:4px 0 0">
+      <a href="#" id="terms-limits">Known limitations</a> — what this does not do — and
+      <a href="#" id="terms-roadmap">the roadmap</a>, both built into this version.
+    </p>
+    <div class="termsact">
+      <button class="btn primary" id="terms-accept">I understand — let me in</button>
+      <button class="btn danger" id="terms-decline">No thanks — shut it down</button>
+    </div>
+    <p class="hint" id="terms-note" style="margin-top:14px">
+      Accepting records that you read this, on this computer only. If the terms change,
+      you will see them again.
+    </p>
+  </div>
+</div>
+
+<div class="modal tipmodal" id="tip-modal">
+  <div class="box">
+    <h2 id="tip-headline"></h2>
+    <div id="tip-body" class="termsbody"></div>
+
+    <div class="tipact">
+      <a class="btn primary" id="tip-pay" href="#" target="_blank" rel="noopener noreferrer">Chip in</a>
+      <button class="btn" id="tip-later">Not right now</button>
+      <button class="btn" id="tip-done">I contribute monthly — stop asking</button>
+    </div>
+    <p class="hint" id="tip-note" style="margin-top:14px">
+      "Chip in" opens PayPal in a new tab. That is the only thing on this page that
+      goes anywhere, and only because you pressed it.
+    </p>
+  </div>
+</div>
+
+<div class="modal" id="test-modal">
+  <div class="box">
+    <h2>Is this thing working?</h2>
+    <p class="hint">Fair question. Security software that is doing its job is silent,
+      and silent looks exactly like broken.</p>
+    <p style="font-size:15.5px;line-height:1.7">
+      This runs a drill: it makes NiteWatch raise <b>every kind of warning it knows how to
+      raise</b>, all at once, so you can see what each one looks like and read what it means
+      before you ever meet one for real. Below is what each will say, and what would actually
+      be happening on your computer for it to appear.
+    </p>
+    <p class="whatis" style="margin-top:14px">
+      <b>Nothing bad happens.</b> No file is touched, no program is started, nothing connects
+      anywhere. The warnings are marked as a test and you can clear them with one button.
+      <br><b>What this proves:</b> that the warnings, the advice and the buttons all work.
+      <b>What it does not prove:</b> that the watching works — the banner at the top of the
+      page is what tells you that.
+    </p>
+    <div id="test-plan" style="margin-top:18px"></div>
+    <div id="test-result" class="actmsg" hidden></div>
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn primary" id="test-run">Run the test</button>
+      <button class="btn" id="test-clear">Clear test warnings</button>
+      <button class="btn" id="test-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="ask-modal">
+  <div class="box">
+    <h2>Ask someone else about this</h2>
+    <p class="hint">This builds a question you can paste into ChatGPT, Claude, Gemini,
+      a forum, or an email to somebody who knows. NiteWatch does not send it — you do,
+      by pasting it wherever you choose.</p>
+
+    <div class="opt" style="border-top:0">
+      <div><label for="ask-redact">Remove personal details</label>
+        <div class="d">Replaces your Windows username and computer name with placeholders.
+          Paths and program names stay, because they are most of what makes the question
+          answerable.</div></div>
+      <div class="ctl"><input type="checkbox" id="ask-redact" checked></div>
+    </div>
+
+    <p class="hint" style="margin:14px 0 8px"><b>This is exactly what will be copied.</b>
+      Read it before you paste it anywhere — whoever runs that service will see all of it.</p>
+    <textarea id="ask-text" class="askbox" spellcheck="false" readonly></textarea>
+
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" id="ask-copy">Copy the question</button>
+      <button class="btn" id="ask-close">Close</button>
+      <span class="saved" id="ask-copied" hidden>Copied</span>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="help-modal">
+  <div class="box">
+    <h2 id="help-title">About this build</h2>
+    <p class="hint">Both documents are built into the version you are running, so they
+      describe this build and not some other one.</p>
+    <p class="hint buildid" id="build-id"></p>
+    <div class="seg" id="help-tabs" style="margin-bottom:16px"></div>
+    <div id="help-body" class="doc"></div>
+    <div style="margin-top:20px"><button class="btn primary" id="help-close">Close</button></div>
+  </div>
+</div>
+
+<div class="modal" id="gloss-modal">
+  <div class="box">
+    <h2>What do these words mean?</h2>
+    <p class="hint">Every technical word this page uses, in plain English.</p>
+    <dl class="gloss" id="gloss-body"></dl>
+    <div style="margin-top:20px"><button class="btn primary" id="gloss-close">Close</button></div>
+  </div>
 </div>
 
 <div class="modal" id="proc-modal">
   <div class="box">
-    <h2 id="proc-title" style="margin:0 0 4px;font-size:15px"></h2>
+    <h2 id="proc-title"></h2>
     <div class="prog" id="proc-path"></div>
+    <p class="whatis plain-only" id="proc-whatis"></p>
+    <div class="lookup" id="proc-verify"></div>
     <div class="pstat" id="proc-stats"></div>
     <div id="proc-body"></div>
     <div style="margin-top:16px"><button class="btn" id="proc-close">Close</button></div>
@@ -278,7 +835,7 @@
     <p class="hint" id="story-sub" style="color:var(--muted);font-size:12px;margin:0"></p>
     <p class="tale" id="story-tale" hidden></p>
     <div class="lookup" id="story-lookup"></div>
-    <div class="stepstoggle" id="story-toggle">▸ Show the individual events</div>
+    <div class="stepstoggle" id="story-toggle">Show the individual events</div>
     <div id="story-steps-wrap" hidden><ol class="chain" id="story-chain"></ol></div>
     <p class="why">This chain is reconstructed from the causal event graph — each step is
       an event that <em>caused</em> the next, ordered by logical (Lamport) clock rather than
@@ -289,6 +846,53 @@
 
 <script>
   let all = [];
+  let LAST_ALERTS = [];
+  let VT_KEY_SET = false;
+  // Everything animated is gated on this, so the whole scheme honours the
+  // system setting rather than each rule remembering to.
+  const MOTION = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The first paint fills an empty page; animating every row then would be a
+  // firework display rather than a signal.
+  let firstPaint = true;
+
+  // A quiet heartbeat in the header. Software that is silent by design should
+  // still look alive — otherwise "is this thing running?" is a fair question
+  // with nothing on screen to answer it.
+  function setLive(running) {
+    const dot = document.getElementById("livedot");
+    const txt = document.getElementById("livetext");
+    if (!dot || !txt) return;
+    dot.classList.toggle("off", !running);
+    const label = running ? "Watching — outbound connection ledger"
+                          : "Not watching — see the notice below";
+    if (txt.textContent !== label) txt.textContent = label;
+  }
+
+  // ── theme ─────────────────────────────────────────────────────────
+  // Follows the operating system until the user expresses a preference, then
+  // remembers theirs. "Dark on dark is hard to see" is most directly answered
+  // by being able to leave.
+  const THEME_KEY = "nitewatch.theme";
+  function applyTheme(mode) {
+    document.documentElement.dataset.theme = mode;
+    const b = document.getElementById("theme-btn");
+    if (b) {
+      b.textContent = mode === "light" ? "☀️" : "🌙";
+      b.title = mode === "light" ? "Switch to dark" : "Switch to light";
+    }
+  }
+  function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* private mode */ }
+    const system = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    applyTheme(saved || system);
+  }
+  initTheme();
+  document.getElementById("theme-btn").addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
+  });
   const $ = (id) => document.getElementById(id);
 
   // Mutating endpoints require this header; it is what stops another site's
@@ -299,6 +903,22 @@
   const NW = {"X-NiteWatch": "1", "X-NiteWatch-Token": TOKEN};
   const post = (url) => fetch(url, {method: "POST", headers: NW});
   const get = (url) => fetch(url, {headers: {"X-NiteWatch-Token": TOKEN}});
+
+  // Every error response from the API is plain text, not JSON. Calling .json()
+  // on one throws "Unexpected token ... is not valid JSON", which is what the
+  // user saw instead of "database is locked" — a readable, transient problem
+  // rendered as gibberish. Read the body first, and only parse it if the
+  // request actually succeeded.
+  async function getJSON(url) {
+    const r = await get(url);
+    const body = await r.text();
+    if (!r.ok) throw new Error(body.trim() || (r.status + " " + r.statusText));
+    try {
+      return JSON.parse(body);
+    } catch (e) {
+      throw new Error("The agent sent a reply this page could not read.");
+    }
+  }
 
   function shortImage(p) {
     if (!p) return "(unknown)";
@@ -378,8 +998,10 @@
     for (const th of $("thead").children) {
       const on = th.dataset.k === sortKey;
       th.classList.toggle("sorted", on);
-      const label = th.textContent.replace(/[\u25b2\u25bc]\s*$/, "").trim();
-      th.innerHTML = esc(label) + (on ? `<span class="arrow">${sortDesc ? "\u25bc" : "\u25b2"}</span>` : "");
+      const label = (th.dataset.label ||= th.textContent.replace(/[\u25b2\u25bc]\s*$/, "").trim());
+      const term = th.dataset.term ? termAttr(th.dataset.term) : "";
+      const head = term ? `<span${term}>${esc(label)}</span>` : esc(label);
+      th.innerHTML = head + (on ? `<span class="arrow">${sortDesc ? "\u25bc" : "\u25b2"}</span>` : "");
     }
   }
 
@@ -409,47 +1031,815 @@
     });
   }
 
+  // ── "ask someone else about this" ─────────────────────────────────
+  // Builds a question and hands it to the user. It does NOT send anything.
+  //
+  // That is the whole design. An alert contains the username, full file paths,
+  // every address a program touched and what it did with them — a far more
+  // detailed picture of a machine than the one address or one fingerprint the
+  // other outbound features disclose. Posting that to a third party is a
+  // decision only the person whose machine it is can make, so the product
+  // stops at the clipboard and shows exactly what is on it first.
+  //
+  // It is also simply more useful this way: it works with any assistant, any
+  // forum, any knowledgeable friend, and needs no API key.
+  let ASK_ALERT = null;
+
+  // Redaction, deliberately narrow. Removing the paths would remove most of
+  // what makes the question answerable, so only the identifiers that say WHO
+  // rather than WHAT are replaced.
+  function redactPersonal(text) {
+    let out = text;
+    const users = new Set();
+    for (const m of text.matchAll(/[A-Za-z]:\\Users\\([^\\\s"]+)/g)) users.add(m[1]);
+    for (const u of users) {
+      if (u.toLowerCase() === "public" || u.toLowerCase() === "default") continue;
+      out = out.split(u).join("<user>");
+    }
+    return out;
+  }
+
+  function askText(a) {
+    const ev = a.evidence || {};
+    const ctx = ev.Context || {};
+    const lines = [];
+
+    lines.push("I'm using NiteWatch, a security tool that watches which programs on my");
+    lines.push("Windows PC talk to the internet and touch sensitive files. It raised the");
+    lines.push("alert below. It is a monitoring tool, not antivirus — it reports things,");
+    lines.push("it does not judge them, and it is explicit that it can be wrong.");
+    lines.push("");
+    lines.push("Please help me work out whether this is something to worry about.");
+    lines.push("Specifically:");
+    lines.push("  1. Is this behaviour normal for this program? Why would it do this?");
+    lines.push("  2. What would make it suspicious rather than routine?");
+    lines.push("  3. What should I actually check, in order?");
+    lines.push("  4. If it IS a problem, what do I do first?");
+    lines.push("");
+    lines.push("=== THE ALERT ===");
+    lines.push("Severity: " + (a.severity || "") + "   Rule: " + (a.ruleId || ""));
+    lines.push("Title: " + (a.title || ""));
+    lines.push("");
+    lines.push((a.narrative || "").trim());
+    lines.push("");
+    if (ev.ImagePath || ev.TargetPath || ev.Target) {
+      lines.push("Program: " + (ev.ImagePath || ev.TargetPath || ev.Target));
+    }
+    for (const [label, key] of [["Destination", "Destination"], ["Address", "RemoteIP"],
+                                ["Network owner", "Owner"], ["Country", "Country"],
+                                ["File it opened", "SecretPath"]]) {
+      if (ev[key]) lines.push(label + ": " + ev[key]);
+    }
+    if ((a.playbook || []).length) {
+      lines.push("");
+      lines.push("What NiteWatch suggested:");
+      a.playbook.forEach((p, i) => lines.push("  " + (i + 1) + ". " + p));
+    }
+
+    if ((ctx.lineage || []).length) {
+      lines.push("");
+      lines.push("=== WHAT LED TO THIS (from the causal event graph) ===");
+      lines.push("Chain: " + ctx.lineage.join(" -> "));
+      if (ctx.launchedBy) {
+        lines.push(ctx.userLaunched
+          ? "Started from " + ctx.launchedBy + ", which usually means I opened it."
+          : "Started by " + ctx.launchedBy + " — not launched from the desktop.");
+      }
+      if ((ctx.recent || []).length) {
+        lines.push("");
+        lines.push("What that program was doing around the same time:");
+        for (const act of ctx.recent) {
+          lines.push("  - " + activityLabel(act.kind) + (act.detail ? " " + act.detail : "") +
+            (act.count > 1 ? " (x" + act.count + ")" : ""));
+        }
+      }
+      lines.push("");
+      lines.push("(NiteWatch cannot see mouse or keyboard input, so it cannot tell whether");
+      lines.push("I clicked something. The above is only what the programs did.)");
+    } else {
+      lines.push("");
+      lines.push("(NiteWatch could not reconstruct what led to this — usually because the");
+      lines.push("program started before it did, so the parent process was never seen.)");
+    }
+    return lines.join("\n");
+  }
+
+  function paintAsk() {
+    if (!ASK_ALERT) return;
+    const raw = askText(ASK_ALERT);
+    $("ask-text").value = $("ask-redact").checked ? redactPersonal(raw) : raw;
+  }
+
+  function openAsk(id) {
+    ASK_ALERT = (LAST_ALERTS || []).find(a => String(a.id) === String(id));
+    if (!ASK_ALERT) return;
+    $("ask-copied").hidden = true;
+    paintAsk();
+    $("ask-modal").classList.add("show");
+  }
+
+  $("ask-redact").addEventListener("change", paintAsk);
+  $("ask-close").addEventListener("click", () => $("ask-modal").classList.remove("show"));
+  $("ask-modal").addEventListener("click", (e) => {
+    if (e.target === $("ask-modal")) $("ask-modal").classList.remove("show");
+  });
+  $("ask-copy").addEventListener("click", async () => {
+    const box = $("ask-text");
+    try {
+      await navigator.clipboard.writeText(box.value);
+    } catch (e) {
+      // Clipboard access can be refused; selecting the text still lets the
+      // user copy it themselves, which is the point of showing it.
+      box.removeAttribute("readonly");
+      box.select();
+      document.execCommand && document.execCommand("copy");
+      box.setAttribute("readonly", "");
+    }
+    const tag = $("ask-copied");
+    tag.hidden = false;
+    setTimeout(() => { tag.hidden = true; }, 2200);
+  });
+
+  // ── the embedded document ─────────────────────────────────────────
+  // A small markdown renderer for ONE trusted document that ships inside the
+  // binary. Everything is escaped first and formatting applied afterwards, so
+  // the path stays safe even though the input is our own — a renderer that
+  // trusts its input is a renderer waiting to be pointed at something else.
+  function renderMarkdown(md) {
+    const esc2 = (t) => esc(t);
+    const inline = (t) => esc2(t)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      // Single-asterisk emphasis, applied AFTER bold so ** is already gone and
+      // cannot be mistaken for two italic markers. Both shipped documents use
+      // it — "what *caused* what", "*which program* made the lookup" — and
+      // without this the reader sees the asterisks instead of the stress.
+      .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, href) =>
+        /^https?:\/\//.test(href)
+          ? `<a href="${esc2(href)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+          : label)
+      // Bare addresses become mail links. Both documents end by asking the
+      // reader to get in touch, and an address you have to select and copy out
+      // of a modal is an address most people will not use. Applied last: by
+      // this point no address can be sitting inside an attribute, because the
+      // link rule above drops any non-http target rather than emitting it.
+      .replace(/([\w.+-]+@[\w-]+\.[\w.-]*[\w])/g,
+        (addr) => `<a href="mailto:${addr}">${addr}</a>`);
+
+    // Markdown joins consecutive non-blank lines into ONE block. Emitting an
+    // element per source line looked equivalent until a **bold run** wrapped
+    // across two lines: the opening marker landed in one element and the
+    // closing one in the next, so neither matched and both showed as literal
+    // asterisks. Text is therefore buffered and joined BEFORE inline
+    // formatting is applied.
+    const out = [];
+    let para = [];      // lines of the paragraph being built
+    let item = null;    // text of the list item being built
+    let inList = false;
+
+    const flushItem = () => {
+      if (item === null) return;
+      out.push(`<li>${inline(item)}</li>`);
+      item = null;
+    };
+    const closeList = () => {
+      flushItem();
+      if (inList) { out.push("</ul>"); inList = false; }
+    };
+    const flushPara = () => {
+      if (!para.length) return;
+      out.push(`<p>${inline(para.join(" "))}</p>`);
+      para = [];
+    };
+
+    for (const raw of md.split("\n")) {
+      const line = raw.replace(/\s+$/, "");
+
+      if (/^\s*$/.test(line)) { flushPara(); closeList(); continue; }
+      if (/^---+$/.test(line)) { flushPara(); closeList(); out.push("<hr>"); continue; }
+
+      const h = line.match(/^(#{1,3})\s+(.*)$/);
+      if (h) {
+        flushPara(); closeList();
+        out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+        continue;
+      }
+
+      const li = line.match(/^\s*[-*]\s+(.*)$/);
+      if (li) {
+        flushPara();
+        flushItem();
+        if (!inList) { out.push("<ul>"); inList = true; }
+        item = li[1];
+        continue;
+      }
+
+      if (item !== null) { item += " " + line.trim(); continue; }  // wrapped bullet
+      para.push(line.trim());                                      // wrapped paragraph
+    }
+    flushPara(); closeList();
+    return out.join("\n");
+  }
+
+  let HELP_DOCS = null;
+  function showDoc(id) {
+    const doc = (HELP_DOCS || []).find(d => d.id === id) || (HELP_DOCS || [])[0];
+    if (!doc) return;
+    $("help-body").innerHTML = renderMarkdown(doc.markdown || "");
+    $("help-body").scrollTop = 0;
+    for (const b of $("help-tabs").children) b.classList.toggle("on", b.dataset.doc === doc.id);
+  }
+
+  async function openHelp(which) {
+    $("help-modal").classList.add("show");
+    if (!HELP_DOCS) {
+      try {
+        const helpResp = await getJSON("/api/help");
+        HELP_DOCS = helpResp.docs || [];
+        if (helpResp.label) {
+          const b = helpResp.build || {};
+          $("build-id").textContent = "Build " + helpResp.label +
+            (b.built ? " · " + new Date(b.built).toLocaleDateString() : "") +
+            (b.go ? " · Go " + b.go : "") +
+            "  —  quote this in any bug report";
+        }
+        $("help-tabs").innerHTML = HELP_DOCS.map(d =>
+          `<button data-doc="${esc(d.id)}">${esc(d.title.replace(/^NiteWatch\s*[—-]\s*/, ""))}</button>`).join("");
+        $("help-tabs").addEventListener("click", (e) => {
+          const b = e.target.closest("button[data-doc]");
+          if (b) showDoc(b.dataset.doc);
+        });
+      } catch (e) {
+        $("help-body").innerHTML = `<p>${esc(String(e.message || e))}</p>`;
+        return;
+      }
+    }
+    showDoc(which || "limits");
+  }
+  $("help-btn").addEventListener("click", () => openHelp("limits"));
+  const footDoc = (which) => (e) => { e.preventDefault(); openHelp(which); };
+  $("foot-limits").addEventListener("click", footDoc("limits"));
+  $("foot-roadmap").addEventListener("click", footDoc("roadmap"));
+  $("foot-tip").addEventListener("click", (e) => { e.preventDefault(); openTip(); });
+  $("foot-terms").addEventListener("click", async (e) => {
+    e.preventDefault();
+    try {
+      const t = await getJSON("/api/terms");
+      $("terms-headline").textContent = t.headline;
+      $("terms-plain").replaceChildren(termsMarkup(t.plain));
+      $("terms-formal").textContent = t.formal;
+      // Already accepted, so this is a read, not a gate: no page lock, and the
+      // buttons become a way out rather than a decision.
+      $("terms-accept").textContent = "Close";
+      $("terms-decline").hidden = true;
+      $("terms-note").textContent = "You accepted these on this computer. Re-reading them changes nothing.";
+      $("terms-modal").classList.add("show");
+    } catch (err) { /* nothing useful to say if the agent will not answer */ }
+  });
+  $("help-close").addEventListener("click", () => $("help-modal").classList.remove("show"));
+  $("help-modal").addEventListener("click", (e) => {
+    if (e.target === $("help-modal")) $("help-modal").classList.remove("show");
+  });
+
+  // ── the pre-release notice ────────────────────────────────────────
+  // Blocking, deliberately. Everything this program does — reading kernel
+  // telemetry, stopping processes, quarantining files — is worth knowing about
+  // before it starts, and a notice nobody has to answer is a notice nobody
+  // reads.
+  //
+  // Acceptance is recorded against the VERSION of the terms, so editing them
+  // asks again rather than leaning on consent given to different words.
+  function termsMarkup(text) {
+    // The source is plain text with **bold** runs and one email address. Built
+    // as elements rather than by injecting HTML, so the disclaimer can never
+    // become an injection route.
+    const frag = document.createDocumentFragment();
+    for (const para of text.split("\n\n")) {
+      const p = document.createElement("p");
+      para.split(/(\*\*[^*]+\*\*)/).forEach(part => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          const b = document.createElement("strong");
+          b.textContent = part.slice(2, -2);
+          p.appendChild(b);
+        } else if (part.includes("threattape@gmail.com")) {
+          const [before, after] = part.split("threattape@gmail.com");
+          p.appendChild(document.createTextNode(before));
+          const a = document.createElement("a");
+          a.href = "mailto:threattape@gmail.com";
+          a.textContent = "threattape@gmail.com";
+          p.appendChild(a);
+          p.appendChild(document.createTextNode(after));
+        } else if (part) {
+          p.appendChild(document.createTextNode(part));
+        }
+      });
+      frag.appendChild(p);
+    }
+    return frag;
+  }
+
+  // ── the contribution notice ───────────────────────────────────────
+  // Shareware, including the part where it is dismissible and means it. The
+  // pacing decision is the server's: a reload must not be able to re-trigger
+  // this, and "not right now" has to still be true after clearing site data.
+  //
+  // Deliberately missing: a countdown before the dismiss button works, a
+  // second prompt on the way out, and a "no thanks, I don't value my security"
+  // decline button. Every one of those raises conversion. A tool asking you to
+  // trust its judgement about your computer cannot also be caught working you
+  // over five dollars.
+  let TIP = null;
+
+  async function loadTip() {
+    if (!TIP) TIP = await getJSON("/api/tip");
+    // Rendered on every open, not just the first: saying "I contribute"
+    // rewrites this box into a thank-you, and reopening it from the header
+    // afterwards must show the ask again rather than a stale acknowledgement.
+    $("tip-headline").textContent = TIP.headline;
+    $("tip-body").replaceChildren(termsMarkup(TIP.body));
+    $("tip-pay").href = TIP.payPal;
+    $("tip-pay").hidden = false;
+    $("tip-done").hidden = false;
+    $("tip-done").disabled = false;
+    $("tip-later").textContent = "Not right now";
+    $("tip-note").textContent = '"Chip in" opens PayPal in a new tab. That is the only ' +
+      "thing on this page that goes anywhere, and only because you pressed it.";
+    return TIP;
+  }
+
+  async function maybeShowTip() {
+    try {
+      const t = await loadTip();
+      if (t.show) $("tip-modal").classList.add("show");
+    } catch (e) { /* never block the dashboard over a donation prompt */ }
+  }
+
+  async function openTip() {
+    try {
+      await loadTip();
+      $("tip-modal").classList.add("show");
+    } catch (e) { /* nothing to show, and nothing worth reporting */ }
+  }
+
+  function closeTip() { $("tip-modal").classList.remove("show"); }
+
+  // Both buttons record a dismissal, so pressing "Chip in" and closing the tab
+  // does not mean being asked again on the next load.
+  async function dismissTip(contributor) {
+    try {
+      await post("/api/tip/dismiss" + (contributor ? "?contributor=1" : ""));
+    } catch (e) { /* it will ask again tomorrow; not worth an error message */ }
+  }
+
+  $("tip-btn").addEventListener("click", openTip);
+  $("tip-later").addEventListener("click", () => { closeTip(); dismissTip(false); });
+  $("tip-done").addEventListener("click", async () => {
+    $("tip-done").disabled = true;
+    await dismissTip(true);
+    if (TIP) {
+      TIP.show = false;
+      // Acknowledge it in place rather than closing instantly: being thanked
+      // is the whole return on the click, and there is no receipt to send.
+      $("tip-body").replaceChildren(termsMarkup(TIP.thanks));
+      $("tip-later").textContent = "Close";
+      $("tip-done").hidden = true;
+      $("tip-pay").hidden = true;
+      $("tip-note").textContent = "";
+    }
+  });
+  // Clicking "Chip in" opens PayPal in a new tab; snooze rather than close, so
+  // the text is still there when they come back.
+  $("tip-pay").addEventListener("click", () => { post("/api/tip/dismiss").catch(() => {}); });
+  $("tip-modal").addEventListener("click", (e) => {
+    if (e.target === $("tip-modal")) dismissTip(false);
+  });
+
+  async function showTermsIfNeeded() {
+    let t;
+    try {
+      t = await getJSON("/api/terms");
+    } catch (e) {
+      return; // an agent without settings cannot record acceptance; do not trap the user
+    }
+    if (t.accepted) { maybeShowTip(); return; }
+
+    $("terms-headline").textContent = t.headline;
+    $("terms-plain").replaceChildren(termsMarkup(t.plain));
+    $("terms-formal").textContent = t.formal;
+    document.body.classList.add("locked");
+    $("terms-modal").classList.add("show");
+  }
+
+  const openOverTerms = (which) => (e) => {
+    e.preventDefault();
+    openHelp(which);
+    // Above the notice, which is otherwise the topmost thing on the page.
+    $("help-modal").style.zIndex = "300";
+  };
+  $("terms-limits").addEventListener("click", openOverTerms("limits"));
+  $("terms-roadmap").addEventListener("click", openOverTerms("roadmap"));
+
+  $("terms-toggle").addEventListener("click", () => {
+    const el = $("terms-formal");
+    el.hidden = !el.hidden;
+    $("terms-toggle").classList.toggle("open", !el.hidden);
+    $("terms-toggle").textContent = (el.hidden ? "Show" : "Hide") + " the formal wording";
+  });
+
+  $("terms-accept").addEventListener("click", async () => {
+    const b = $("terms-accept");
+    if (b.textContent === "Close") {          // re-reading, not accepting
+      $("terms-modal").classList.remove("show");
+      return;
+    }
+    b.disabled = true;
+    try {
+      const r = await post("/api/terms/accept");
+      if (!r.ok) throw new Error((await r.text()).trim() || r.statusText);
+      $("terms-modal").classList.remove("show");
+      document.body.classList.remove("locked");
+      maybeShowTip();
+    } catch (e) {
+      b.disabled = false;
+      $("terms-note").textContent = "That could not be recorded: " + (e.message || e);
+    }
+  });
+
+  $("terms-decline").addEventListener("click", async () => {
+    $("terms-accept").disabled = true;
+    $("terms-decline").disabled = true;
+    $("terms-note").textContent = "Stopping NiteWatch. You can close this tab.";
+    try { await post("/api/shutdown"); } catch (e) { /* it is going away regardless */ }
+    $("terms-plain").replaceChildren(termsMarkup(
+      "**NiteWatch has been stopped.** Nothing is being recorded.\n\n" +
+      "If you change your mind, start it again and you will see this notice once more. " +
+      "If something here put you off and it was not the risk itself, I would like to " +
+      "know which part: threattape@gmail.com"));
+    $("terms-formal").hidden = true;
+    $("terms-toggle").hidden = true;
+  });
+
+  // ── rendering ─────────────────────────────────────────────────────
+  // The table and the alert list are RECONCILED, not rebuilt.
+  //
+  // Both used to be wiped and regenerated every five seconds. That destroys
+  // every node under the cursor, so hover states flickered, the scroll position
+  // jumped, and a click landing in the same tick as a refresh hit whichever row
+  // had taken that position — which is why the page felt impossible to use. It
+  // also threw away the "Done"/"Dismissed" state of buttons the user had just
+  // pressed.
+  //
+  // Now each row and each alert has a stable key, nodes are reused, and only
+  // the cells whose text actually changed are touched.
+
+  const ROW_CELLS = 11;
+
+  // Column identity, in table order. The keys match the th[data-k] attributes,
+  // so hiding is done with one generated stylesheet rather than by touching
+  // class names — which matters because the reconciler rewrites those on every
+  // paint and would undo anything set there.
+  const COLUMNS = [
+    {key: "lastSeen",  label: "Last seen",  essential: true},
+    {key: "image",     label: "Program",    essential: true, required: true},
+    {key: "domain",    label: "Destination", essential: true, required: true},
+    {key: "remoteIP",  label: "IP:Port",    essential: false},
+    {key: "asOrg",     label: "Owner",      essential: true},
+    {key: "country",   label: "Country",    essential: false},
+    {key: "proto",     label: "Type",       essential: false},
+    {key: "inbound",   label: "Direction",  essential: false},
+    {key: "bytesSent", label: "Sent",       essential: true},
+    {key: "bytesRecv", label: "Received",   essential: false},
+    {key: "events",    label: "Activity",   essential: false},
+  ];
+  const COLS_KEY = "nitewatch.columns";
+  let hiddenCols = new Set();
+
+  function applyColumns() {
+    let sheet = document.getElementById("colstyle");
+    if (!sheet) {
+      sheet = document.createElement("style");
+      sheet.id = "colstyle";
+      document.head.appendChild(sheet);
+    }
+    sheet.textContent = [...hiddenCols].map(k =>
+      `th[data-k="${k}"], td[data-col="${k}"] { display: none; }`).join("\n");
+  }
+
+  function saveColumns() {
+    try { localStorage.setItem(COLS_KEY, JSON.stringify([...hiddenCols])); }
+    catch (e) { /* private mode */ }
+  }
+
+  function loadColumns() {
+    try {
+      const raw = localStorage.getItem(COLS_KEY);
+      if (raw) hiddenCols = new Set(JSON.parse(raw));
+    } catch (e) { /* private mode */ }
+    // Program and Destination answer "who is talking to whom", which is the
+    // whole point; hiding them would leave a table that says nothing.
+    for (const c of COLUMNS) if (c.required) hiddenCols.delete(c.key);
+    applyColumns();
+  }
+
+  function paintColumnList() {
+    $("col-list").innerHTML = COLUMNS.map(c => `
+      <label class="${c.required ? "locked" : ""}">
+        <input type="checkbox" data-col-key="${c.key}"
+          ${hiddenCols.has(c.key) ? "" : "checked"} ${c.required ? "disabled" : ""}>
+        <span>${esc(c.label)}${c.required ? ` <span class="why">— always shown</span>` : ""}</span>
+      </label>`).join("");
+  }
+
+  function paintGroupBtn() {
+    const b = $("group-btn");
+    b.textContent = grouped ? "Grouped" : "Flat list";
+    b.classList.toggle("on", grouped);
+  }
+  $("group-btn").addEventListener("click", () => {
+    grouped = !grouped;
+    try { localStorage.setItem(GROUP_KEY, grouped ? "1" : "0"); } catch (e) { /* private mode */ }
+    paintGroupBtn();
+    $("rows").replaceChildren();   // the two layouts do not share row keys
+    render();
+  });
+
+  $("cols-btn").addEventListener("click", () => {
+    paintColumnList();
+    $("columns").classList.toggle("show");
+    $("settings").classList.remove("show");
+  });
+  $("col-close").addEventListener("click", () => $("columns").classList.remove("show"));
+  $("col-list").addEventListener("change", (e) => {
+    const box = e.target.closest("[data-col-key]");
+    if (!box) return;
+    if (box.checked) hiddenCols.delete(box.dataset.colKey);
+    else hiddenCols.add(box.dataset.colKey);
+    applyColumns(); saveColumns();
+  });
+  $("col-all").addEventListener("click", () => {
+    hiddenCols.clear(); applyColumns(); saveColumns(); paintColumnList();
+  });
+  $("col-essentials").addEventListener("click", () => {
+    hiddenCols = new Set(COLUMNS.filter(c => !c.essential && !c.required).map(c => c.key));
+    applyColumns(); saveColumns(); paintColumnList();
+  });
+
+  function rowCells(c) {
+    const dest = c.domain || "— no name —";
+    return [
+      [fmtTime(c.lastSeen || c.time), "", "first seen " + fmtTime(c.time)],
+      [shortImage(c.image), "proc", "See everything this program is doing"],
+      [dest, c.domain ? "domain" : "raw", c.domain || "No DNS name seen for this address"],
+      [hostPort(c.remoteIP, c.remotePort), "", hostPort(c.remoteIP, c.remotePort)],
+      [c.asOrg || "—", "owner", c.asn ? "AS" + c.asn : "unknown owner"],
+      [c.country || "—", "cc", "", c.country ? "chip" : ""],
+      [c.proto || "", "proto", "", c.proto ? "chip" : ""],
+      [c.inbound ? "in ←" : "out →", "dir",
+       c.inbound ? "They contacted this PC" : "This PC contacted them",
+       c.inbound ? "in" : "out"],
+      [bytes(c.bytesSent), "num", ""],
+      [bytes(c.bytesRecv), "num", ""],
+      [String(c.events || 1), "num", ""],
+    ];
+  }
+
+  function newRow() {
+    const tr = document.createElement("tr");
+    for (let i = 0; i < ROW_CELLS; i++) {
+      const td = document.createElement("td");
+      td.dataset.col = COLUMNS[i].key;
+      tr.appendChild(td);
+    }
+    return tr;
+  }
+
+  // Writing to textContent/className unconditionally still dirties the node and
+  // can drop a text selection, so every write is guarded by a comparison.
+  function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
+  function setAttr(el, k, v) { if ((el.getAttribute(k) || "") !== v) el.setAttribute(k, v); }
+
+  function paintRow(tr, c, isNew) {
+    const cells = rowCells(c);
+    for (let i = 0; i < ROW_CELLS; i++) {
+      const td = tr.children[i];
+      const [text, cls, title, chip] = cells[i];
+      // A value that just changed is worth pointing at. Only on existing rows —
+      // on a brand-new row every cell is "changed", which would be noise.
+      const changed = !isNew && td.textContent !== "" && td.textContent !== text;
+      if (chip) {
+        // A chip needs an inner element to carry the background. Reuse it
+        // rather than rebuilding, so reconciliation stays cheap.
+        let span = td.firstElementChild;
+        if (!span || span.tagName !== "SPAN") {
+          td.textContent = "";
+          span = document.createElement("span");
+          td.appendChild(span);
+        }
+        setText(span, text);
+        if (span.className !== chip) span.className = chip;
+      } else {
+        if (td.firstElementChild) td.textContent = "";
+        setText(td, text);
+      }
+      if (td.className !== cls) td.className = cls;
+      setAttr(td, "title", title);
+      if (changed && MOTION) {
+        td.classList.remove("changed");
+        void td.offsetWidth;            // restart the animation
+        td.classList.add("changed");
+      }
+    }
+    tr.children[1].dataset.img = c.image || "";
+    const clickable = !!c.hasStory;
+    if (tr.classList.contains("clickable") !== clickable) {
+      tr.classList.toggle("clickable", clickable);
+      setAttr(tr, "title", clickable ? "Click for the chain of events that caused this connection" : "");
+    }
+    if (tr.dataset.id !== String(c.id)) tr.dataset.id = String(c.id);
+  }
+
+  // Grouped by program.
+  //
+  // A browser produces dozens of rows and they were all called "brave.exe",
+  // which made the ledger read as noise: the same name forty times, and the
+  // one line that mattered buried among them. Grouping asks the question the
+  // table is actually for — WHICH PROGRAMS are talking, and how much — and
+  // leaves the individual connections one click away.
+  const GROUP_KEY = "nitewatch.grouped";
+  let grouped = true;
+  let openGroups = new Set();
+
+  try { grouped = localStorage.getItem(GROUP_KEY) !== "0"; } catch (e) { /* private mode */ }
+
+  function groupRows(rows) {
+    const byImage = new Map();
+    for (const c of rows) {
+      const k = c.image || "";
+      let g = byImage.get(k);
+      if (!g) {
+        g = {image: k, rows: [], sent: 0, recv: 0, dests: new Set(),
+             countries: new Set(), last: "", flagged: false};
+        byImage.set(k, g);
+      }
+      g.rows.push(c);
+      g.sent += c.bytesSent || 0;
+      g.recv += c.bytesRecv || 0;
+      g.dests.add(c.domain || c.remoteIP);
+      if (c.country) g.countries.add(c.country);
+      const t = c.lastSeen || c.time;
+      if (!g.last || t > g.last) g.last = t;
+    }
+    // Busiest first by volume out, which is the column people scan for.
+    return [...byImage.values()].sort((a, b) => (b.sent + b.recv) - (a.sent + a.recv));
+  }
+
+  function groupRow(g) {
+    const tr = document.createElement("tr");
+    tr.className = "grouphead";
+    tr.dataset.group = g.image;
+    const td = document.createElement("td");
+    td.colSpan = ROW_CELLS;
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function paintGroup(tr, g) {
+    const open = openGroups.has(g.image);
+    tr.classList.toggle("open", open);
+    const n = g.rows.length;
+    tr.firstElementChild.innerHTML =
+      `<span class="tw">▸</span>` +
+      `<span class="gname" data-group-img="${esc(g.image)}" ` +
+      `title="See everything known about this program">${esc(shortImage(g.image))}</span>` +
+      `<span class="gmeta">${n} connection${n === 1 ? "" : "s"} · ` +
+      `${g.dests.size} destination${g.dests.size === 1 ? "" : "s"}` +
+      `${g.countries.size > 1 ? ` · ${g.countries.size} countries` : ""}</span>` +
+      `<span class="gbytes">↑${esc(bytes(g.sent))} ↓${esc(bytes(g.recv))}</span>`;
+    // The header cell spans every column, so it is as wide as the table — which
+    // is wider than the window. Pin its contents to the visible width instead,
+    // or the totals sit off the right edge where nobody sees them.
+    tr.firstElementChild.firstElementChild.parentElement.style.maxWidth =
+      (document.querySelector(".tablewrap")?.clientWidth || 0) + "px";
+  }
+
   function render() {
     syncCountryOptions();
     const rows = applySort(visible());
     const tb = $("rows");
-    tb.innerHTML = "";
+    if (grouped) return renderGrouped(rows, tb);
+
+    // Index what is already on screen so nodes survive across refreshes.
+    const existing = new Map();
+    for (const tr of Array.from(tb.children)) existing.set(tr.dataset.id, tr);
+
+    let cursor = tb.firstElementChild;
     for (const c of rows) {
-      const tr = document.createElement("tr");
-      if (c.hasStory) {
-        tr.className = "clickable";
-        tr.title = "Click for the chain of events that caused this connection";
-        tr.addEventListener("click", (ev) => {
-          // The process cell is its own destination; do not hijack it.
-          if (ev.target.closest("td.proc")) return;
-          showStory(c);
-        });
+      const key = String(c.id);
+      let tr = existing.get(key);
+      const isNew = !tr;
+      if (tr) {
+        existing.delete(key);
+      } else {
+        tr = newRow();
       }
-      const dest = c.domain
-        ? `<td class="domain" title="${esc(c.domain)}">${esc(c.domain)}</td>`
-        : `<td class="raw" title="No DNS name seen for this address">— no name —</td>`;
-      tr.innerHTML =
-        `<td title="first seen ${esc(fmtTime(c.time))}">${esc(fmtTime(c.lastSeen || c.time))}</td>` +
-        `<td class="proc" data-img="${esc(c.image)}" title="See everything this program is doing">${esc(shortImage(c.image))}</td>` +
-        dest +
-        `<td title="${esc(hostPort(c.remoteIP, c.remotePort))}">${esc(hostPort(c.remoteIP, c.remotePort))}</td>` +
-        `<td class="owner" title="${c.asn ? "AS" + c.asn : "unknown owner"}">${esc(c.asOrg || "—")}</td>` +
-        `<td class="cc">${esc(c.country || "—")}</td>` +
-        `<td>${esc(c.proto)}</td>` +
-        `<td title="${c.inbound ? "They contacted this PC" : "This PC contacted them"}">${c.inbound ? "in ←" : "out →"}</td>` +
-        `<td class="num">${esc(bytes(c.bytesSent))}</td>` +
-        `<td class="num">${esc(bytes(c.bytesRecv))}</td>` +
-        `<td class="num">${esc(c.events || 1)}</td>`;
-      tb.appendChild(tr);
+      paintRow(tr, c, isNew);
+      if (isNew && MOTION && !firstPaint) {
+        tr.classList.add("is-new");
+        setTimeout(() => tr.classList.remove("is-new"), 1700);
+      }
+      if (tr === cursor) {
+        cursor = cursor.nextElementSibling;   // already in the right place
+      } else {
+        tb.insertBefore(tr, cursor);          // moves, or inserts, in one step
+      }
     }
-    tb.querySelectorAll("td.proc").forEach(td => {
-      td.addEventListener("click", (ev) => { ev.stopPropagation(); showProcess(td.dataset.img); });
-    });
+    // Anything left was not in the new list.
+    for (const tr of existing.values()) tr.remove();
+
     $("empty").hidden = rows.length > 0;
-    $("c-total").textContent = rows.length;
-    $("c-talkers").textContent = new Set(rows.map(c => c.image)).size;
-    $("c-domains").textContent = new Set(rows.map(c => c.domain || c.remoteIP)).size;
+    bumpStat($("c-total"), rows.length);
+    bumpStat($("c-talkers"), new Set(rows.map(c => c.image)).size);
+    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    firstPaint = false;
   }
+
+  // The headline numbers pop when they move, and only when they move.
+  function bumpStat(el, value) {
+    const next = String(value);
+    if (el.textContent === next) return;
+    el.textContent = next;
+    if (!MOTION || firstPaint) return;
+    el.classList.remove("bumped");
+    void el.offsetWidth;
+    el.classList.add("bumped");
+  }
+
+  // Grouped rendering reuses the same reconciler discipline: keys are the
+  // program path for headers and the connection id for children, so expanding a
+  // group does not disturb anything else and a refresh does not collapse it.
+  function renderGrouped(rows, tb) {
+    const groups = groupRows(rows);
+    const existing = new Map();
+    for (const tr of Array.from(tb.children)) {
+      existing.set(tr.dataset.group !== undefined ? "g:" + tr.dataset.group : "r:" + tr.dataset.id, tr);
+    }
+
+    let cursor = tb.firstElementChild;
+    const place = (tr) => {
+      if (tr === cursor) cursor = cursor.nextElementSibling;
+      else tb.insertBefore(tr, cursor);
+    };
+
+    for (const g of groups) {
+      const gk = "g:" + g.image;
+      let head = existing.get(gk);
+      if (head) existing.delete(gk); else head = groupRow(g);
+      paintGroup(head, g);
+      place(head);
+
+      if (!openGroups.has(g.image)) continue;
+      for (const c of g.rows) {
+        const rk = "r:" + c.id;
+        let tr = existing.get(rk);
+        const isNew = !tr;
+        if (tr) existing.delete(rk); else tr = newRow();
+        tr.classList.add("child");
+        paintRow(tr, c, isNew);
+        // The group header already says which program this is.
+        const nameCell = tr.querySelector('td[data-col="image"]');
+        if (nameCell && nameCell.textContent) nameCell.textContent = "";
+        place(tr);
+      }
+    }
+    for (const tr of existing.values()) tr.remove();
+
+    $("empty").hidden = groups.length > 0;
+    bumpStat($("c-total"), rows.length);
+    bumpStat($("c-talkers"), groups.length);
+    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    firstPaint = false;
+  }
+
+  // Delegated once, rather than rebound to every row on every refresh. This is
+  // also what makes node reuse safe: no listener is ever attached twice.
+  $("rows").addEventListener("click", (ev) => {
+    const gname = ev.target.closest("[data-group-img]");
+    if (gname) { ev.stopPropagation(); showProcess(gname.dataset.groupImg); return; }
+    const head = ev.target.closest("tr.grouphead");
+    if (head) {
+      const k = head.dataset.group;
+      if (openGroups.has(k)) openGroups.delete(k); else openGroups.add(k);
+      render();
+      return;
+    }
+    const proc = ev.target.closest("td.proc");
+    if (proc) { ev.stopPropagation(); showProcess(proc.dataset.img); return; }
+    const tr = ev.target.closest("tr");
+    if (!tr || !tr.classList.contains("clickable")) return;
+    const c = all.find(x => String(x.id) === tr.dataset.id);
+    if (c) showStory(c);
+  });
 
   function syncCountryOptions() {
     const sel = $("ccfilter");
@@ -480,12 +1870,16 @@
   });
   async function loadSettings() {
     try {
-      const v = await (await get("/api/settings")).json();
+      const v = await getJSON("/api/settings");
       $("s-local").checked = !!v.includeLocal;
       $("s-resolve").checked = !!v.resolveNames;
       $("s-recon").checked = !!v.recon;
       $("s-dedup").value = v.dedupSeconds;
       $("s-retention").value = v.retentionDays;
+      // The key itself is never sent back, only whether one exists.
+      VT_KEY_SET = !!v.virusTotalKeySet;
+      $("s-vtkey").placeholder = VT_KEY_SET ? "Saved — type to replace" : "Not set";
+      $("s-vtkey").value = "";
     } catch (e) { /* panel stays as-is */ }
   }
   $("s-save").addEventListener("click", async () => {
@@ -495,6 +1889,9 @@
       recon: $("s-recon").checked,
       dedupSeconds: Number($("s-dedup").value) || 300,
       retentionDays: Number($("s-retention").value) || 90,
+      // Blank means "leave it alone" — the server never handed us the real one
+      // to send back, so blanking it must not wipe it.
+      virusTotalKey: $("s-vtkey").value.trim(),
     };
     try {
       const r = await fetch("/api/settings", {
@@ -506,6 +1903,9 @@
       const v = await r.json();           // server echoes clamped values
       $("s-dedup").value = v.dedupSeconds;
       $("s-retention").value = v.retentionDays;
+      VT_KEY_SET = !!v.virusTotalKeySet;
+      $("s-vtkey").value = "";
+      $("s-vtkey").placeholder = VT_KEY_SET ? "Saved — type to replace" : "Not set";
       const tag = $("s-saved");
       tag.hidden = false;
       setTimeout(() => { tag.hidden = true; }, 1800);
@@ -515,12 +1915,313 @@
 
   // --- causal story ---
   // Everything known about one program, in one place.
+  // ── the drill ─────────────────────────────────────────────────────
+  // "Is this thing even on?" is a fair question about software that is silent
+  // by design. This answers it by making every warning appear at once, with an
+  // explanation of what would really be happening for each.
+  async function paintTestPlan() {
+    try {
+      const d = await getJSON("/api/selftest/plan");
+      $("test-plan").innerHTML = `<div class="cause"><h4>What it will show you</h4><ul>` +
+        (d.scenarios || []).map(sc =>
+          `<li style="margin-bottom:9px"><b>${esc(sc.title)}</b><br>
+             <span style="color:var(--muted)">${esc(sc.real)}</span></li>`).join("") +
+        `</ul></div>`;
+    } catch (e) {
+      $("test-plan").innerHTML = `<p class="whatis">${esc(String(e.message || e))}</p>`;
+    }
+  }
+
+  $("test-btn").addEventListener("click", async () => {
+    $("test-result").hidden = true;
+    $("test-modal").classList.add("show");
+    await paintTestPlan();
+  });
+  $("test-close").addEventListener("click", () => $("test-modal").classList.remove("show"));
+  $("test-modal").addEventListener("click", (e) => {
+    if (e.target === $("test-modal")) $("test-modal").classList.remove("show");
+  });
+
+  $("test-run").addEventListener("click", async () => {
+    const b = $("test-run");
+    b.disabled = true; b.textContent = "Running…";
+    const out = $("test-result");
+    out.hidden = false; out.classList.remove("bad");
+    try {
+      const r = await post("/api/selftest");
+      const body = await r.text();
+      if (!r.ok) throw new Error(body.trim() || r.statusText);
+      const res = JSON.parse(body);
+      const skipped = (res.scenarios || []).filter(x => x.skipped);
+      const skipNote = skipped.length
+        ? " " + skipped.length + " was skipped: " + skipped.map(x => x.skip).join(" ")
+        : "";
+      if (res.missing && res.missing.length) {
+        out.classList.add("bad");
+        out.textContent = `${res.fired} of ${res.expected} warnings appeared. `
+          + `These did not, which is a real fault worth reporting: ${res.missing.join(", ")}.`
+          + skipNote;
+      } else {
+        out.textContent = `All ${res.expected} warnings appeared. Close this and scroll `
+          + `the list — each is marked TEST. "Clear test warnings" removes them.` + skipNote;
+      }
+      await refreshAlerts();
+    } catch (e) {
+      out.classList.add("bad");
+      out.textContent = String(e.message || e);
+    } finally {
+      b.disabled = false; b.textContent = "Run the test";
+    }
+  });
+
+  $("test-clear").addEventListener("click", async () => {
+    const out = $("test-result");
+    out.hidden = false; out.classList.remove("bad");
+    try {
+      const r = await post("/api/selftest/clear");
+      const body = await r.text();
+      if (!r.ok) throw new Error(body.trim() || r.statusText);
+      out.textContent = `Removed ${JSON.parse(body).removed} test warnings. Real ones are untouched.`;
+      await refreshAlerts();
+    } catch (e) {
+      out.classList.add("bad");
+      out.textContent = String(e.message || e);
+    }
+  });
+
+  // ── "is this program legitimate?" ─────────────────────────────────
+  // The honest answer to an unsigned program is: here is everything this
+  // machine can tell you, and here is the one number you can check elsewhere.
+  // Nothing is sent anywhere — pasting a hash into a reputation service is the
+  // user's decision, on a machine of their choosing.
+  function paintVerify(image) {
+    const el = $("proc-verify");
+    el.innerHTML = "";
+    if (!image) return;
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "Check this program";
+    const note = document.createElement("span");
+    note.className = "ext";
+    note.textContent = "Reads the program file on this computer — its fingerprint, its size, "
+      + "and the publisher details built into it. Nothing is sent anywhere. Large programs "
+      + "take a moment.";
+    const out = document.createElement("div");
+    el.append(btn, note, out);
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Reading the file…";
+      try {
+        const r = await post("/api/verify?image=" + encodeURIComponent(image));
+        const body = await r.text();
+        if (!r.ok) throw new Error(body.trim() || r.statusText);
+        renderVerify(out, JSON.parse(body));
+      } catch (e) {
+        out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = "Check this program";
+      }
+    });
+  }
+
+  function renderVerify(out, d) {
+    const id = d.identity || {};
+    const rows = [];
+    const add = (k, v) => { if (v) rows.push([k, v]); };
+    add("Publisher (from the signature)", d.signer);
+    add("Company (claimed by the file)", id.company);
+    add("Product", id.product);
+    add("Version", id.fileVersion);
+    add("Description", id.description);
+    if (d.store && d.package) {
+      add("Store package", d.package.name);
+      add("Publisher ID", d.package.publisherId);
+    }
+    add("Size", id.sizeBytes ? bytes(id.sizeBytes) : "");
+    add("Fingerprint (SHA-256)", id.sha256);
+
+    const verdict = d.vouched
+      ? `<p class="note">This program is ${esc(d.why)}</p>`
+      : `<p class="note">Nothing vouches for this program. It carries no signature Windows
+           can check, and it is not installed from a place only Windows can write to. That is
+           not proof of anything — plenty of small tools are like this — but it means the
+           name and the icon are the only things claiming what it is, and both are trivial
+           to copy.</p>`;
+
+    const dig = id.sha256 ? `
+      <p class="src"><b>To check it yourself:</b> the fingerprint above is unique to this exact
+        file. Copy it and paste it into
+        <a class="ext-link" href="https://www.virustotal.com/gui/home/search"
+          target="_blank" rel="noopener noreferrer">virustotal.com</a> — that searches by fingerprint
+        alone, so you are not uploading your file or telling anyone your filenames. Dozens of
+        antivirus engines will say whether they have seen it. A fingerprint nobody has ever
+        seen is not automatically bad, but for a program claiming to be well-known software it
+        is a very odd thing to be.</p>
+      <p class="src">Cross-check the claimed company against where the file actually lives. A
+        file claiming to be from Microsoft, sitting in your Downloads folder, unsigned, is
+        claiming something it cannot back up.</p>` : "";
+
+    out.innerHTML = `<div class="res">` + verdict +
+      (rows.length ? `<dl>${rows.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : "") +
+      dig + (id.error ? `<p class="err">${esc(id.error)}</p>` : "") +
+      `<div id="rep-slot"></div></div>`;
+    if (id.sha256) paintReputation(document.getElementById("rep-slot"), id.sha256);
+  }
+
+  // Asking VirusTotal is the one thing here that leaves the machine, so it gets
+  // the same treatment as the registration lookup: its own button, its own
+  // disclosure, and nothing happens until it is pressed.
+  function paintReputation(slot, sha256) {
+    if (!slot) return;
+    if (!VT_KEY_SET) {
+      // Somebody reading this has just decided they want the check. Put the
+      // link in front of them rather than sending them off to find it.
+      slot.innerHTML = `<p class="src"><b>Want this checked for you?</b> A button appears
+        here to check the fingerprint against about seventy antivirus engines, without you
+        copying anything — it needs a free VirusTotal key.
+        <br><a class="ext-link" href="https://www.virustotal.com/gui/join-us"
+          target="_blank" rel="noopener noreferrer">Get a free key</a>,
+        copy it from
+        <a class="ext-link" href="https://www.virustotal.com/gui/my-apikey"
+          target="_blank" rel="noopener noreferrer">your API key page</a>,
+        then paste it into Settings. About a minute.</p>`;
+      return;
+    }
+    const btn = document.createElement("button");
+    btn.className = "btn ext-btn";
+    btn.style.marginTop = "12px";
+    btn.textContent = "Check against antivirus engines";
+    const note = document.createElement("span");
+    note.className = "ext";
+    note.textContent = "This sends the fingerprint above to VirusTotal — not the file, not "
+      + "its name, not its location, and nothing else about this computer. They look it up "
+      + "in a database they already have. For common software the question reveals nothing; "
+      + "for a file that exists nowhere else, it tells them somebody has it.";
+    const out = document.createElement("div");
+    slot.append(btn, note, out);
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = "Asking VirusTotal…";
+      try {
+        const r = await post("/api/reputation?sha256=" + encodeURIComponent(sha256));
+        const body = await r.text();
+        if (!r.ok) throw new Error(body.trim() || r.statusText);
+        renderReputation(out, JSON.parse(body));
+      } catch (e) {
+        out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
+      } finally {
+        btn.disabled = false; btn.textContent = "Check against antivirus engines";
+      }
+    });
+  }
+
+  function renderReputation(out, rep) {
+    // Colour by severity, but let the words carry the meaning — a bare "3/72"
+    // misleads in both directions.
+    const tone = rep.malicious >= 3 ? "var(--bad)"
+      : (rep.malicious + rep.suspicious) > 0 ? "var(--new)" : "var(--ok)";
+    const rows = [];
+    if (rep.known) {
+      rows.push(["Flagged as malicious", `${rep.malicious} of ${rep.total} engines`]);
+      if (rep.suspicious) rows.push(["Flagged as suspicious", String(rep.suspicious)]);
+      if (rep.firstSeen) rows.push(["First seen by VirusTotal", rep.firstSeen]);
+      if (rep.labels && rep.labels.length) rows.push(["Called", rep.labels.join(", ")]);
+      if (rep.names && rep.names.length) rows.push(["Also distributed as", rep.names.join(", ")]);
+    }
+    out.innerHTML = `<div class="res" style="margin-top:12px">
+      <p class="note" style="color:${tone}"><b>${esc(rep.verdict)}</b></p>
+      <p class="src" style="font-size:13.5px;color:#dde4f0">${esc(rep.advice)}</p>
+      ${rows.length ? `<dl style="margin-top:10px">${rows.map(([k, v]) =>
+        `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : ""}
+      <p class="src">Answered by VirusTotal. Engine agreement is evidence, not proof — new
+        malware is missed by everyone on its first day, and ordinary installers trip one or
+        two engines all the time.</p>
+    </div>`;
+  }
+
+  // ── plain-English help ────────────────────────────────────────────
+  // Off by default. Somebody who knows what a PID is should never have to look
+  // at a definition of one, so this adds nothing to the page until asked.
+  const PLAIN_KEY = "nitewatch.plain";
+  let TERMS = null;
+
+  function setPlain(on) {
+    document.body.classList.toggle("plain", on);
+    $("plain-toggle").checked = on;
+    try { localStorage.setItem(PLAIN_KEY, on ? "1" : "0"); } catch (e) { /* private mode */ }
+    paintHeaders();  // header tooltips depend on the mode
+    render();
+  }
+  $("plain-toggle").addEventListener("change", async (e) => {
+    if (e.target.checked) await loadTerms();
+    setPlain(e.target.checked);
+  });
+
+  async function loadTerms() {
+    if (TERMS) return TERMS;
+    try {
+      const d = await getJSON("/api/explain");
+      TERMS = d.terms || {};
+    } catch (e) {
+      TERMS = {};
+    }
+    return TERMS;
+  }
+
+  // A short definition attached to a column heading or label, shown only in
+  // plain mode so it never clutters the view for someone who doesn't want it.
+  function termAttr(key) {
+    if (!document.body.classList.contains("plain") || !TERMS) return "";
+    const t = TERMS[key];
+    return t ? ` class="term" title="${esc(t.term)}: ${esc(t.short)}"` : "";
+  }
+
+  async function paintWhatIs(image) {
+    const el = $("proc-whatis");
+    el.textContent = "";
+    if (!document.body.classList.contains("plain")) return;
+    try {
+      const d = await getJSON("/api/explain?image=" + encodeURIComponent(image));
+      if (!d.known) {
+        // Saying nothing is the honest answer. An invented description would be
+        // a confident lie to somebody with no way to check it.
+        el.innerHTML = `<b>We don't have a description for this one.</b> That by itself
+          means nothing — most programs on a computer are not on any list. What matters
+          is the rest of this page: where it connects, and whether you started it.`;
+        return;
+      }
+      const p = d.program;
+      let html = `<b>${esc(p.name)}</b> — ${esc(p.what)}`;
+      if (p.publisher) html += ` Made by ${esc(p.publisher)}.`;
+      if (p.system) html += ` This is part of Windows itself, not something you installed.`;
+      if (p.expected) html += `<br><b>What's normal for it:</b> ${esc(p.expected)}`;
+      el.innerHTML = html;
+    } catch (e) {
+      el.textContent = "";
+    }
+  }
+
+  $("gloss-btn").addEventListener("click", async () => {
+    const terms = await loadTerms();
+    const keys = Object.keys(terms).sort((a, b) => terms[a].term.localeCompare(terms[b].term));
+    $("gloss-body").innerHTML = keys.map(k =>
+      `<div><dt>${esc(terms[k].term)}</dt><dd>${esc(terms[k].long)}</dd></div>`).join("");
+    $("gloss-modal").classList.add("show");
+  });
+  $("gloss-close").addEventListener("click", () => $("gloss-modal").classList.remove("show"));
+  $("gloss-modal").addEventListener("click", (e) => {
+    if (e.target === $("gloss-modal")) $("gloss-modal").classList.remove("show");
+  });
+
   async function showProcess(image) {
     if (!image) return;
     try {
-      const p = await (await get("/api/process?image=" + encodeURIComponent(image))).json();
+      const p = await getJSON("/api/process?image=" + encodeURIComponent(image));
       $("proc-title").textContent = shortImage(image);
       $("proc-path").innerHTML = `<span class="k">Program:</span> ${esc(image)}`;
+      await paintWhatIs(image);
+      paintVerify(image);
       $("proc-stats").innerHTML =
         stat(p.destinations, "destinations") +
         stat(bytes(p.bytesSent), "sent") +
@@ -545,7 +2246,7 @@
             return `<li><span>${esc(c.domain || c.remoteIP)}</span>` +
               `<span class="g">${esc(c.asOrg || "—")} ${esc(c.country || "")} · ` +
               `↑${esc(bytes(c.bytesSent))} ↓${esc(bytes(c.bytesRecv))}` +
-              (t ? `<button class="lk" data-lookup="${esc(t)}" title="Asks a public registry who owns ${esc(t)} — this leaves your computer">who owns this?</button>` : "") +
+              (t ? `<button class="lk" data-lookup="${esc(t.name)}" data-lookup-ip="${esc(t.ip)}" title="Asks a public registry who owns ${esc(t.name)} — this leaves your computer">who owns this?</button>` : "") +
               `</span><div class="lkres"></div></li>`;
           }).join("") +
           `</ul>` +
@@ -576,17 +2277,42 @@
     const btn = e.target.closest("button[data-lookup]");
     if (!btn) return;
     const out = btn.closest("li").querySelector(".lkres");
-    runLookup(btn.dataset.lookup, btn, out);
+    runLookup({name: btn.dataset.lookup, ip: btn.dataset.lookupIp || ""}, btn, out);
   });
   $("proc-close").addEventListener("click", () => $("proc-modal").classList.remove("show"));
   $("proc-modal").addEventListener("click", (e) => {
     if (e.target === $("proc-modal")) $("proc-modal").classList.remove("show");
   });
 
+  // Opens the causal story for a connection id. The alert carries the id, the
+  // table carries the row — and if the row has scrolled out of the ledger the
+  // story is still on the server, so fetch regardless and fill in what we can.
+  async function showStoryById(id) {
+    const known = all.find(x => Number(x.id) === id);
+    if (known) { showStory(known); return; }
+    try {
+      const st = await getJSON("/api/story?id=" + encodeURIComponent(id));
+      $("story-title").textContent = "What led to this";
+      $("story-sub").textContent = "";
+      $("story-tale").textContent = st.narrative || "";
+      $("story-chain").innerHTML = (st.steps || []).map(s =>
+        `<li><span class="k">${esc(stepLabel(s.kind))}</span>` +
+        (s.source ? ` <span class="s">${esc(s.source)}</span>` : "") +
+        (s.detail ? `<div class="d">${esc(s.detail)}</div>` : "") + `</li>`).join("");
+      $("story-steps-wrap").hidden = false;
+      $("story-lookup").innerHTML = "";
+      $("story-modal").classList.add("show");
+    } catch (e) {
+      $("story-title").textContent = "Could not load the story";
+      $("story-tale").textContent = String(e.message || e);
+      $("story-modal").classList.add("show");
+    }
+  }
+
   async function showStory(c) {
     if (!c.hasStory) return;
     try {
-      const st = await (await get("/api/story?id=" + encodeURIComponent(c.id))).json();
+      const st = await getJSON("/api/story?id=" + encodeURIComponent(c.id));
       $("story-title").textContent = "Why " + shortImage(c.image) + " contacted " +
         (c.domain || c.remoteIP);
       $("story-sub").textContent = (c.asOrg ? c.asOrg + " · " : "") +
@@ -618,20 +2344,26 @@
 
   function lookupTargetFor(c) {
     // Prefer the name: a domain's registration date is the useful signal, and a
-    // name lookup reveals no more than the address lookup already would.
-    return c.domain || c.remoteIP || "";
+    // name lookup reveals no more than the address lookup already would. The
+    // address travels with it so the agent can pick whichever actually has a
+    // record — most hostnames have none of their own.
+    return { name: c.domain || c.remoteIP || "", ip: c.remoteIP || "" };
   }
 
-  function renderLookupControl(container, target) {
+  function renderLookupControl(container, t) {
     container.innerHTML = "";
-    if (!target) return;
+    const target = typeof t === "string" ? { name: t, ip: "" } : (t || { name: "" });
+    if (!target.name) return;
     const btn = document.createElement("button");
     btn.className = "btn ext-btn";
-    btn.textContent = "Look up who registered " + target;
+    btn.textContent = "Look up who registered " + target.name;
     const note = document.createElement("span");
     note.className = "ext";
     note.textContent = "This is the only button here that leaves your computer. " +
-      "It asks the public registry (rdap.org) who owns " + target + ", which tells " +
+      // target is {name, ip}; interpolating the object rendered the disclosure
+      // as "who owns [object Object]". The one sentence that tells a user
+      // exactly what is about to leave their machine has to name the thing.
+      "It asks the public registry (rdap.org) who owns " + target.name + ", which tells " +
       "them you are looking it up. Nothing about your machine, your programs or " +
       "your other traffic is sent — only that one address.";
     const out = document.createElement("div");
@@ -639,17 +2371,20 @@
     btn.addEventListener("click", () => runLookup(target, btn, out));
   }
 
-  async function runLookup(target, btn, out) {
-    if (lookupCache.has(target)) { renderRegistration(out, lookupCache.get(target)); return; }
+  async function runLookup(t, btn, out) {
+    const target = typeof t === "string" ? { name: t, ip: "" } : t;
+    const key = target.name + "|" + (target.ip || "");
+    if (lookupCache.has(key)) { renderRegistration(out, lookupCache.get(key)); return; }
     btn.disabled = true;
     const label = btn.textContent;
     btn.textContent = "Asking the registry…";
     try {
-      const r = await post("/api/lookup?q=" + encodeURIComponent(target));
+      const r = await post("/api/lookup?q=" + encodeURIComponent(target.name)
+        + (target.ip ? "&ip=" + encodeURIComponent(target.ip) : ""));
       const body = await r.text();
       if (!r.ok) throw new Error(body.trim() || r.statusText);
       const reg = JSON.parse(body);
-      lookupCache.set(target, reg);
+      lookupCache.set(key, reg);
       renderRegistration(out, reg);
     } catch (e) {
       out.innerHTML = `<div class="err">${esc(String(e.message || e))}</div>`;
@@ -678,6 +2413,7 @@
     const noteClass = reg.ageDays >= 0 && reg.ageDays <= 180 ? "note" : "note old";
     out.innerHTML =
       `<div class="res">` +
+      (reg.substituted ? `<p class="src" style="margin:0 0 10px">${esc(reg.substituted)}</p>` : "") +
       (reg.note ? `<p class="${noteClass}">${esc(reg.note)}</p>` : "") +
       (rows.length
         ? `<dl>` + rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") + `</dl>`
@@ -709,7 +2445,8 @@
   $("story-toggle").addEventListener("click", () => {
     const w = $("story-steps-wrap");
     w.hidden = !w.hidden;
-    $("story-toggle").textContent = (w.hidden ? "▸ Show" : "▾ Hide") + " the individual events";
+    $("story-toggle").classList.toggle("open", !w.hidden);
+    $("story-toggle").textContent = (w.hidden ? "Show" : "Hide") + " the individual events";
   });
   $("story-close").addEventListener("click", () => $("story-modal").classList.remove("show"));
   $("story-modal").addEventListener("click", (e) => {
@@ -724,8 +2461,9 @@
 
   async function refreshStatus() {
     try {
-      const st = await (await get("/api/status")).json();
+      const st = await getJSON("/api/status");
       const b = $("banner");
+      setLive(st.running);
       if (st.running) { b.className = "banner"; return; }
       b.className = "banner show";
       if (st.source === "live-etw" && !st.elevated) {
@@ -762,8 +2500,11 @@
     const p = ev && (ev.ImagePath || ev.TargetPath || ev.Target);
     if (!p) return "";
     const odd = /\\(appdata|downloads|temp|public|programdata)\\/i.test(p);
+    // Clickable, because this is the shortest path from "something touched my
+    // passwords" to "here is what started it and everywhere else it went".
     return `<div class="prog"><span class="k">Program:</span> ` +
-      `<span class="${odd ? "odd" : ""}">${esc(p)}</span>` +
+      `<span class="proglink ${odd ? "odd" : ""}" data-alert-img="${esc(p)}" ` +
+      `title="See everything known about this program">${esc(p)}</span>` +
       (odd ? ` <span class="k">— not where installed software normally lives</span>` : "") +
       `</div>`;
   }
@@ -772,7 +2513,16 @@
   // doing. This is the "why did that happen?" that a flat log cannot answer.
   function causeHTML(ev) {
     const c = ev && ev.Context;
-    if (!c || !(c.lineage || []).length) return "";
+    if (!c || !(c.lineage || []).length) {
+      // Rendering nothing here used to leave the reader with no explanation and
+      // no sign that one was even attempted.
+      const p = ev && (ev.ImagePath || ev.TargetPath || ev.Target);
+      return `<div class="cause"><h4>What led to this</h4>
+        <div class="note">The chain of events behind this could not be reconstructed —
+        usually because the program started before NiteWatch did, so its parent was
+        never seen.${p ? ` Everything else known about it is under
+        <b>What led to this</b> below.` : ""}</div></div>`;
+    }
     const acts = (c.recent || []).map(a =>
       `<li>${esc(activityLabel(a.kind))}${a.detail ? " " + esc(a.detail) : ""}` +
       (a.count > 1 ? ` <span class="cnt">×${a.count}</span>` : "") + `</li>`).join("");
@@ -793,15 +2543,34 @@
       RegPersist: "Changed startup setting" })[kind] || kind;
   }
 
+  // A drill must never be mistakable for a real warning. Somebody who sees
+  // "your files are being encrypted", acts on it, and later learns it was a
+  // test will not believe the next one.
+  function isDrill(a) { return !!(a.evidence && a.evidence.Drill); }
+  function drillBadge(a) {
+    return isDrill(a) ? `<span class="sev drill">TEST</span>` : "";
+  }
+
+  function alertImage(a) {
+    const ev = a.evidence || {};
+    return ev.ImagePath || ev.TargetPath || ev.Target || "";
+  }
+
   function alertHTML(a) {
     const steps = (a.playbook || []).map(p => `<li>${esc(p)}</li>`).join("");
-    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}">
-      <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${esc(a.title)}</h3>
+    return `<div class="alert ${esc(a.severity)}${a.status === "acknowledged" ? " acked" : ""}${isDrill(a) ? " drill" : ""}" data-alert-id="${esc(a.id)}" data-sig="${esc(alertSig(a))}">
+      <h3><span class="when${ageClass(a.time)}">${esc(ago(a.time))}</span><span class="sev">${esc(a.severity)}</span>${drillBadge(a)}${esc(a.title)}</h3>
       <p>${esc(a.narrative)}</p>
       ${programHTML(a.evidence)}
       ${steps ? `<ol>${steps}</ol>` : ""}
       ${causeHTML(a.evidence)}
       <div class="act" id="acts-${a.id}">
+        ${alertImage(a) ? `<button class="btn trace" data-alert-img="${esc(alertImage(a))}"
+          title="What started it, everywhere it talks, every alert about it">What led to this</button>` : ""}
+        <button class="btn trace" data-alert-ask="${a.id}"
+          title="Build a question you can paste into an AI or send to someone">Ask about this</button>
+        ${a.connId > 0 ? `<button class="btn trace" data-alert-conn="${a.connId}"
+          title="The chain of events behind this exact connection">See this connection</button>` : ""}
         <button class="btn" data-ack="${a.id}">${a.status === "acknowledged" ? "Dismissed" : "Got it, dismiss"}</button>
         <button class="btn" data-allow="${a.id}" title="Stop warning about this program contacting this destination. Other programs and destinations are unaffected.">This is expected — always allow</button>
       </div>
@@ -810,32 +2579,86 @@
   }
   async function refreshAlerts() {
     try {
-      const list = await (await get("/api/alerts?limit=50")).json() || [];
+      const list = await getJSON("/api/alerts?limit=50") || [];
       const box = $("alerts");
       const open = list.filter(a => a.status !== "acknowledged");
-      box.innerHTML = open.map(alertHTML).join("");
-      box.querySelectorAll("[data-allow]").forEach(b => {
-        b.addEventListener("click", async () => {
-          await post("/api/alerts/allow?id=" + encodeURIComponent(b.dataset.allow));
-          refreshAlerts();
-        });
-      });
-      box.querySelectorAll("[data-ack]").forEach(b => {
-        b.addEventListener("click", async () => {
-          await post("/api/alerts/ack?id=" + encodeURIComponent(b.dataset.ack));
-          refreshAlerts();
-        });
-      });
-      document.title = open.length ? `(${open.length}) NiteWatch` : "NiteWatch — Who's Talking?";
-      open.forEach(a => loadActions(a));
-    } catch (e) { /* ignore */ }
+      LAST_ALERTS = open;   // so "Ask about this" can rebuild the full question
+
+      // Reconciled by alert id, for the same reason as the table — and one
+      // more: an alert card holds state the server knows nothing about. If you
+      // have just pressed "Stop this program" and the card gets rebuilt, the
+      // button reverts and the message saying what happened disappears. Cards
+      // that are already correct are left completely untouched.
+      const existing = new Map();
+      for (const el of Array.from(box.children)) existing.set(el.dataset.alertId, el);
+
+      let cursor = box.firstElementChild;
+      for (const a of open) {
+        const key = String(a.id);
+        let el = existing.get(key);
+        if (el) {
+          existing.delete(key);
+          // Only re-render when the server's view of it actually changed.
+          if (el.dataset.sig !== alertSig(a)) {
+            const tmp = document.createElement("div");
+            tmp.innerHTML = alertHTML(a);
+            const fresh = tmp.firstElementChild;
+            box.replaceChild(fresh, el);
+            el = fresh;
+            loadActions(a);
+          }
+        } else {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = alertHTML(a);
+          el = tmp.firstElementChild;
+          loadActions(a);
+        }
+        if (el === cursor) {
+          cursor = cursor.nextElementSibling;
+        } else {
+          box.insertBefore(el, cursor);
+        }
+      }
+      for (const el of existing.values()) el.remove();
+
+      const title = open.length ? "(" + open.length + ") NiteWatch" : "NiteWatch — Who's Talking?";
+      if (document.title !== title) document.title = title;
+    } catch (e) { /* keep the last good view on a transient error */ }
   }
+
+  // alertSig covers what the SERVER can change about an alert. Anything not in
+  // here is local state that a refresh must not disturb.
+  function alertSig(a) {
+    return [a.id, a.status, a.severity, a.title, a.narrative,
+            (a.playbook || []).length].join("|");
+  }
+
+  // Delegated once for the whole list, so reused cards keep working.
+  $("alerts").addEventListener("click", async (ev) => {
+    const img = ev.target.closest("[data-alert-img]");
+    if (img) { showProcess(img.dataset.alertImg); return; }
+    const conn = ev.target.closest("[data-alert-conn]");
+    if (conn) { showStoryById(Number(conn.dataset.alertConn)); return; }
+    const ask = ev.target.closest("[data-alert-ask]");
+    if (ask) { openAsk(ask.dataset.alertAsk); return; }
+    const allow = ev.target.closest("[data-allow]");
+    if (allow) {
+      await post("/api/alerts/allow?id=" + encodeURIComponent(allow.dataset.allow));
+      refreshAlerts();
+      return;
+    }
+    const ack = ev.target.closest("[data-ack]");
+    if (ack) {
+      await post("/api/alerts/ack?id=" + encodeURIComponent(ack.dataset.ack));
+      refreshAlerts();
+    }
+  });
   // Remediation buttons are added only after asking the agent what it can
   // actually do for this alert — offering a fix that cannot run is worse than
   // offering none.
   async function loadActions(a) {
     try {
-      const r = await (await get("/api/actions?alert=" + encodeURIComponent(a.id))).json();
+      const r = await getJSON("/api/actions?alert=" + encodeURIComponent(a.id));
       if (!r.available || !(r.actions || []).length) return;
       const box = $("acts-" + a.id);
       if (!box || box.dataset.loaded) return;
@@ -873,16 +2696,69 @@
     } catch (e) { /* leave the alert without action buttons */ }
   }
 
+  // A refresh must never move something out from under the pointer.
+  //
+  // Reconciling the DOM removed most of the jumping, but two sources remained:
+  // re-sorting can legitimately reorder rows while somebody is reaching for
+  // one, and re-rendering behind an open modal is work nobody can see. So the
+  // paint is deferred — not the fetch — whenever the user is plainly in the
+  // middle of something. The data stays current; only the redraw waits.
+  function userIsBusy() {
+    if (document.querySelector(".modal.show")) return true;      // reading a story
+    if (document.getElementById("settings").classList.contains("show")) return true;
+    if (document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) {
+      return true;                                               // typing a filter
+    }
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return true;                    // copying text
+    if (document.querySelector("#rows tr:hover")) return true;   // about to click a row
+    return false;
+  }
+
+  let pendingPaint = false;
+
+  function paint() {
+    if (userIsBusy()) { pendingPaint = true; return; }
+    pendingPaint = false;
+    // Reconciling can still change the scroll extent when rows are added or
+    // removed; hold the horizontal position so a wide table does not slide.
+    const wrap = document.querySelector(".tablewrap");
+    const left = wrap ? wrap.scrollLeft : 0;
+    render();
+    if (wrap && wrap.scrollLeft !== left) wrap.scrollLeft = left;
+  }
+
+  // Apply a deferred paint as soon as the user is free.
+  //
+  // Deliberately a poll rather than a list of events to listen for. The obvious
+  // events do not line up with the state they are supposed to signal: a modal
+  // closes on `click`, which fires AFTER `mouseup`, so a mouseup handler still
+  // sees the modal open and defers again. Rather than enumerate every way a
+  // person can stop being busy and get the ordering right for each, ask.
+  setInterval(() => { if (pendingPaint && !userIsBusy()) paint(); }, 400);
+
   async function refresh() {
     refreshAlerts();
     try {
-      const r = await get("/api/connections?limit=1000");
-      all = await r.json() || [];
-      render();
+      const rows = await getJSON("/api/connections?limit=1000");
+      all = rows || [];
+      paint();
     } catch (e) { /* keep last view on transient error */ }
     refreshStatus();
   }
-  $("filter").addEventListener("input", render);
+  $("filter").addEventListener("input", () => { pendingPaint = false; render(); });
+
+  // Restore the plain-English preference before the first paint, so the page
+  // does not flash from one mode to the other.
+  (async () => {
+    let want = false;
+    try { want = localStorage.getItem(PLAIN_KEY) === "1"; } catch (e) { /* private mode */ }
+    if (want) { await loadTerms(); setPlain(true); }
+  })();
+
+  showTermsIfNeeded();
+  loadColumns();
+  paintGroupBtn();
   paintHeaders();
   refresh();
   setInterval(refresh, 5000);

@@ -26,10 +26,12 @@ import (
 	"time"
 
 	"github.com/threattape/nitewatch/agent/internal/api"
+	"github.com/threattape/nitewatch/agent/internal/buildinfo"
 	"github.com/threattape/nitewatch/agent/internal/collector"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/legal"
 	"github.com/threattape/nitewatch/agent/internal/notify"
 	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
@@ -38,10 +40,15 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/rules"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
+	"github.com/threattape/nitewatch/agent/internal/tip"
 	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
-var version = "0.1.0-dev"
+var version = "0.1.0-pre"
+
+// build is resolved once at startup. Go initialises it after version, since it
+// depends on it, so a version set at link time is still picked up.
+var build = buildinfo.Read(version)
 
 // baseDir is the directory the agent keeps its files in — next to the exe, so
 // there are no %ProgramData% permission variables to reason about during
@@ -79,7 +86,9 @@ func main() {
 		}
 	}()
 
-	log.Printf("NiteWatch agent %s", version)
+	log.Printf("NiteWatch agent %s", build.Label())
+	log.Print(legal.LogText)
+	log.Print(tip.LogText)
 	log.Printf("env: os=%s arch=%s elevated=%v", runtime.GOOS, runtime.GOARCH, platform.IsElevated())
 	if exe, err := os.Executable(); err == nil {
 		log.Printf("env: exe=%s", exe)
@@ -106,17 +115,19 @@ func main() {
 			return out, nil
 		},
 	}
-	if eng := startDetection(*rulesDir, *noFeeds); eng != nil {
+	eng, feeds := startDetection(*rulesDir, *noFeeds)
+	if eng != nil {
 		opts.Detect = eng
 	}
-	if err := run(*replayPath, *serve, *open, *dbPath, opts, seed); err != nil {
+	if err := run(*replayPath, *serve, *open, *dbPath, opts, seed, eng, feeds); err != nil {
 		log.Printf("fatal: %v", err)
 		holdOpen()
 		os.Exit(1)
 	}
 }
 
-func run(replayPath string, serve, open bool, dbPath string, opts collector.Options, seed settings.Values) error {
+func run(replayPath string, serve, open bool, dbPath string, opts collector.Options, seed settings.Values,
+	eng *detect.Engine, feeds *intel.Store) error {
 	if dir := filepath.Dir(dbPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create ledger dir %q: %w", dir, err)
@@ -147,11 +158,15 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	var srv *api.Server
 	if serve {
 		quarantine := filepath.Join(baseDir(), "quarantine")
-		srv = api.New(led).WithSettings(cfg).
+		srv = api.New(led).WithSettings(cfg).WithBuild(build).
 			WithExecutor(respond.NewWindowsExecutor(quarantine), quarantine).
 			// Registration lookups. Available, never automatic: nothing reaches
 			// the registry unless the user presses the button for one address.
-			WithLookups(rdap.New())
+			WithLookups(rdap.New()).
+			// The on-demand drill. Needs the live engine and feed store so the
+			// test exercises the real rules rather than a copy of them.
+			WithSelfTest(eng, feeds).
+			WithShutdown(stop)
 		if tok, err := api.NewToken(baseDir()); err == nil {
 			srv = srv.WithToken(tok)
 			log.Printf("api: token required; stored at %s", tok.Path())
@@ -227,7 +242,7 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 // startDetection loads rule packs and (unless disabled) threat feeds. Detection
 // is optional: a pack that fails to load must not stop the flight recorder,
 // which is useful on its own.
-func startDetection(rulesDir string, noFeeds bool) *detect.Engine {
+func startDetection(rulesDir string, noFeeds bool) (*detect.Engine, *intel.Store) {
 	var packs []*rules.Pack
 	load := func(name string, data []byte) {
 		p, err := rules.LoadPack(data)
@@ -269,7 +284,7 @@ func startDetection(rulesDir string, noFeeds bool) *detect.Engine {
 	}
 	if len(packs) == 0 {
 		log.Print("rules: no packs loaded; detection disabled")
-		return nil
+		return nil, nil
 	}
 
 	var feeds *intel.Store
@@ -285,7 +300,7 @@ func startDetection(rulesDir string, noFeeds bool) *detect.Engine {
 			feeds.RefreshLoop(ctx, dir, intel.DefaultSources)
 		}()
 	}
-	return detect.New(rules.NewSet(packs...), feeds)
+	return detect.New(rules.NewSet(packs...), feeds), feeds
 }
 
 // startRecon loads the offline address-ownership dataset in the background.

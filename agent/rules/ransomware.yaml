@@ -24,7 +24,6 @@ rules:
       - "Once stopped, disconnect from the internet before restarting."
       - "Examples of files affected: {{.SampleFiles}}"
       - "If you have a backup on a drive that is currently unplugged, LEAVE IT UNPLUGGED until this is resolved."
-      - "Program: {{.ImagePath}}"
 
   - id: ransomware-suspected
     area: ransomware
@@ -37,14 +36,10 @@ rules:
 
       Backup tools, sync clients and photo editors do this legitimately. So does
       ransomware in its first minute. It is worth checking that you started this.
-
-      The program is:
-        {{.ImagePath}}
     playbook:
       - "Did you just start a backup, a sync, or a bulk edit? If so, this is expected."
       - "If you did not, stop the program using the button below."
       - "Examples of files affected: {{.SampleFiles}}"
-      - "Program: {{.ImagePath}}"
 
   - id: ransomware-backup-destruction
     area: ransomware
@@ -61,4 +56,3 @@ rules:
       - "If you did not start a maintenance task, treat this as an emergency and disconnect from the internet."
       - "Stop the program using the button below."
       - "Do not restart the machine until you have advice — a shutdown may complete what this started."
-      - "Program: {{.ImagePath}}"

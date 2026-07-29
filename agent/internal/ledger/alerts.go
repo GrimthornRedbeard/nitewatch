@@ -247,3 +247,19 @@ func (d *DB) AckAlert(id int64) error {
 	_, err := d.sql.Exec(`UPDATE alerts SET status = 'acknowledged' WHERE id = ?`, id)
 	return err
 }
+
+// DeleteDrillAlerts removes every alert produced by the self-test.
+//
+// Drills are the one kind of alert it is safe to delete outright. Real
+// warnings are never removed — an unread one is exactly what somebody needs to
+// find later — but a drill has served its purpose the moment it has been read,
+// and leaving a wall of fake "your files are being encrypted" behind would make
+// the next real alert easier to ignore.
+func (d *DB) DeleteDrillAlerts() (int64, error) {
+	res, err := d.sql.Exec(
+		`DELETE FROM alerts WHERE json_extract(evidence, '$.Drill') = 1`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

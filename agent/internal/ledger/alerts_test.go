@@ -89,3 +89,39 @@ func TestAckAndCount(t *testing.T) {
 		t.Fatalf("want 1 new after ack, got %d", n)
 	}
 }
+
+// Drills are the one kind of alert that may be deleted; real warnings never are.
+func TestDeleteDrillAlertsLeavesRealOnesAlone(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "drill.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	real := Alert{Time: time.Now(), RuleID: "c2-beaconing", Area: "c2", Severity: "high",
+		Title: "real", Narrative: "n", Evidence: map[string]any{"RemoteIP": "1.2.3.4"}}
+	drill := Alert{Time: time.Now(), RuleID: "ransomware-confirmed", Area: "ransomware",
+		Severity: "critical", Title: "drill", Narrative: "n",
+		Evidence: map[string]any{"Drill": true, "RemoteIP": "203.0.113.13"}}
+	if _, err := db.RecordAlert(real); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RecordAlert(drill); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := db.DeleteDrillAlerts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("deleted %d, want 1", n)
+	}
+	left, err := db.RecentAlerts(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].Title != "real" {
+		t.Errorf("wrong alerts left: %+v", left)
+	}
+}

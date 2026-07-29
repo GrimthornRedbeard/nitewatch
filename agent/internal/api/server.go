@@ -8,18 +8,29 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/threattape/nitewatch/agent/internal/buildinfo"
 	"github.com/threattape/nitewatch/agent/internal/detect"
+	"github.com/threattape/nitewatch/agent/internal/explain"
+	"github.com/threattape/nitewatch/agent/internal/help"
+	"github.com/threattape/nitewatch/agent/internal/intel"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
+	"github.com/threattape/nitewatch/agent/internal/legal"
+	"github.com/threattape/nitewatch/agent/internal/platform"
 	"github.com/threattape/nitewatch/agent/internal/rdap"
 	"github.com/threattape/nitewatch/agent/internal/respond"
+	"github.com/threattape/nitewatch/agent/internal/selftest"
 	"github.com/threattape/nitewatch/agent/internal/settings"
+	"github.com/threattape/nitewatch/agent/internal/tip"
+	"github.com/threattape/nitewatch/agent/internal/vt"
 )
 
 //go:embed dashboard
@@ -36,7 +47,12 @@ type Server struct {
 	quarantineDir string
 	token         *Token
 	rdap          *rdap.Client
+	vt            *vt.Client
+	stop          func()
+	engine        *detect.Engine
+	feeds         *intel.Store
 	addr          string
+	build         buildinfo.Info
 
 	mu     sync.RWMutex
 	status Status
@@ -86,9 +102,23 @@ func (s *Server) WithLookups(c *rdap.Client) *Server {
 	return s
 }
 
+// WithShutdown lets the dashboard stop the agent, which is what "I do not
+// accept these terms" has to mean to be worth anything.
+func (s *Server) WithShutdown(stop func()) *Server {
+	s.stop = stop
+	return s
+}
+
 // WithSettings enables the dashboard's configuration panel.
+// WithBuild records which build is running, for display in the About panel.
+func (s *Server) WithBuild(b buildinfo.Info) *Server {
+	s.build = b
+	return s
+}
+
 func (s *Server) WithSettings(st *settings.Store) *Server {
 	s.settings = st
+	s.vt = vt.New(st.Get().VirusTotalKey)
 	return s
 }
 
@@ -154,6 +184,22 @@ func (s *Server) Handler() http.Handler {
 	// outbound request that tells a registry what the user is looking at.
 	// Nothing should be able to trigger it by embedding a URL.
 	mux.HandleFunc("/api/lookup", guardMutation(s.handleLookup))
+	mux.HandleFunc("/api/explain", s.handleExplain)
+	mux.HandleFunc("/api/terms", s.handleTerms)
+	mux.HandleFunc("/api/help", s.handleHelp)
+	mux.HandleFunc("/api/terms/accept", guardMutation(s.handleAcceptTerms))
+	mux.HandleFunc("/api/tip", s.handleTip)
+	mux.HandleFunc("/api/tip/dismiss", guardMutation(s.handleDismissTip))
+	mux.HandleFunc("/api/shutdown", guardMutation(s.handleShutdown))
+	// Both mutate: one writes alerts, the other deletes them. Guarded so no
+	// link or image can make the agent shout at somebody.
+	mux.HandleFunc("/api/selftest", guardMutation(s.handleSelfTest))
+	mux.HandleFunc("/api/selftest/plan", s.handleSelfTestPlan)
+	// Hashing a large file costs real time and touches the disk, so it happens
+	// only when the user asks. Guarded like a mutation for that reason.
+	mux.HandleFunc("/api/verify", guardMutation(s.handleVerify))
+	mux.HandleFunc("/api/reputation", guardMutation(s.handleReputation))
+	mux.HandleFunc("/api/selftest/clear", guardMutation(s.handleClearDrills))
 
 	// Serve the embedded dashboard at "/". The embed root includes the
 	// "dashboard" dir, so strip it to a clean file server.
@@ -285,21 +331,88 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, s.settings.Get())
+		writeJSON(w, redactSecrets(s.settings.Get()))
 	case http.MethodPut, http.MethodPost:
 		var v settings.Values
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&v); err != nil {
 			http.Error(w, "invalid settings payload", http.StatusBadRequest)
 			return
 		}
+		// An empty key on save means "leave it alone", not "delete it" — the GET
+		// above never hands the real one back, so a round-trip through the
+		// settings form would otherwise wipe it. Clearing is explicit.
+		if v.VirusTotalKey == "" && r.URL.Query().Get("clearKey") == "" {
+			v.VirusTotalKey = s.settings.Get().VirusTotalKey
+		}
 		if err := s.settings.Set(v); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, s.settings.Get()) // echo the sanitized result
+		s.refreshVT()
+		writeJSON(w, redactSecrets(s.settings.Get()))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// redactSecrets strips credentials before settings go over the wire. The API is
+// token-guarded, so this is defence in depth rather than the boundary — but a
+// key that is never echoed cannot leak through a screenshot, a bug report, or a
+// browser extension reading the page.
+func redactSecrets(v settings.Values) map[string]any {
+	return map[string]any{
+		"includeLocal":  v.IncludeLocal,
+		"resolveNames":  v.ResolveNames,
+		"recon":         v.Recon,
+		"dedupSeconds":  v.DedupSeconds,
+		"retentionDays": v.RetentionDays,
+		// Whether a key is set, never the key itself.
+		"virusTotalKeySet": v.VirusTotalKey != "",
+	}
+}
+
+// refreshVT rebuilds the reputation client after the key changes.
+func (s *Server) refreshVT() {
+	if s.settings == nil {
+		return
+	}
+	s.mu.Lock()
+	s.vt = vt.New(s.settings.Get().VirusTotalKey)
+	s.mu.Unlock()
+}
+
+// handleReputation asks VirusTotal about one file's fingerprint.
+//
+// The single most sensitive thing this agent can do, and gated accordingly:
+// POST only, guarded, disabled unless the user supplied their own key, and
+// never called by anything automatic. The UI states what leaves the machine and
+// what it does not before the button is pressed.
+func (s *Server) handleReputation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.RLock()
+	client := s.vt
+	s.mu.RUnlock()
+	if client == nil || !client.Enabled() {
+		http.Error(w, "no VirusTotal key is configured — add one in Settings to switch this on",
+			http.StatusNotFound)
+		return
+	}
+	sum := r.URL.Query().Get("sha256")
+	if sum == "" {
+		http.Error(w, "missing sha256", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	rep, err := client.Lookup(ctx, sum)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, rep)
 }
 
 // handleStory returns the stored causal chain for one connection: the answer to
@@ -344,10 +457,14 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing q", http.StatusBadRequest)
 		return
 	}
+	// The address is passed alongside the name so the client can answer the
+	// question the user meant: registries hold no record for most hostnames,
+	// and many hostnames are generated from the address anyway.
+	ip := r.URL.Query().Get("ip")
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	reg, err := s.rdap.Lookup(ctx, q)
+	reg, err := s.rdap.LookupBest(ctx, q, ip)
 	if err != nil {
 		// The message is written for a person to read, so pass it through rather
 		// than flattening it to a status code.
@@ -355,6 +472,234 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, reg)
+}
+
+// handleExplain serves the plain-English layer: what a program is, and what the
+// jargon on screen means. Answered entirely from a table compiled into the
+// binary — no lookup leaves the machine, and nothing here influences detection.
+func (s *Server) handleExplain(w http.ResponseWriter, r *http.Request) {
+	if image := r.URL.Query().Get("image"); image != "" {
+		p, ok := explain.ForImage(image)
+		if !ok {
+			// Silence is the correct answer for something we do not recognise.
+			// Guessing would be a confident lie to somebody with no way to check.
+			writeJSON(w, map[string]any{"known": false})
+			return
+		}
+		writeJSON(w, map[string]any{"known": true, "program": p})
+		return
+	}
+	writeJSON(w, map[string]any{"terms": explain.AllTerms()})
+}
+
+// WithSelfTest enables the on-demand drill. Optional, like the executor: an
+// agent without it still alerts normally.
+func (s *Server) WithSelfTest(e *detect.Engine, feeds *intel.Store) *Server {
+	s.engine = e
+	s.feeds = feeds
+	return s
+}
+
+// handleSelfTestPlan describes what the drill will do, before it does it. Read
+// only — the UI shows this so nobody presses a button whose effect is a screen
+// full of "your files are being encrypted" they did not expect.
+func (s *Server) handleSelfTestPlan(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"scenarios": selftest.Explain(time.Now())})
+}
+
+func (s *Server) handleSelfTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.engine == nil {
+		http.Error(w, "detection is not enabled on this agent, so there is nothing to test", http.StatusNotFound)
+		return
+	}
+	res, err := selftest.Run(s.engine, s.feeds, s.ledger, time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, res)
+}
+
+func (s *Server) handleClearDrills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	n, err := s.ledger.DeleteDrillAlerts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"removed": n})
+}
+
+// handleVerify gathers everything the machine itself can say about a program
+// file: its hash, its size, and the publisher details embedded in it.
+//
+// Nothing is sent anywhere. The point is to hand the user facts they can check
+// themselves — pasting a hash into a reputation service is their decision to
+// make, on a machine of their choosing, not something this agent does on their
+// behalf.
+func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	image := r.URL.Query().Get("image")
+	if image == "" {
+		http.Error(w, "missing image", http.StatusBadRequest)
+		return
+	}
+	id := platform.Identify(image)
+	signed, signer := platform.FileSigner(image)
+	trust := detect.ClassifyInstall(image, signed, signer)
+	pkg, ver, pubID, isStore := detect.StorePackage(image)
+
+	writeJSON(w, map[string]any{
+		"identity": id,
+		"signed":   signed,
+		"signer":   signer,
+		"vouched":  trust.Vouched,
+		"why":      trust.Why,
+		"store":    isStore,
+		"package":  map[string]any{"name": pkg, "version": ver, "publisherId": pubID},
+	})
+}
+
+// handleHelp serves the known-limitations document, compiled into the binary.
+//
+// The disclaimer tells people to read it, and somebody running the exe has no
+// repository to read it in — so it travels with the build or the instruction is
+// worthless.
+func (s *Server) handleHelp(w http.ResponseWriter, r *http.Request) {
+	// The build identity rides along with the documents because they share a
+	// panel, and because "which version are you running?" is the first question
+	// asked of any bug report from a public download.
+	writeJSON(w, map[string]any{
+		"docs":  help.Docs(),
+		"build": s.build,
+		"label": s.build.Label(),
+	})
+}
+
+// handleTerms serves the pre-release disclaimer and whether it has been
+// accepted. Readable without accepting, obviously — refusing to show somebody
+// the terms until they agree to them would be quite the trick.
+func (s *Server) handleTerms(w http.ResponseWriter, r *http.Request) {
+	accepted := false
+	if s.settings != nil {
+		accepted = s.settings.Get().AcceptedTerms == legal.Version()
+	}
+	writeJSON(w, map[string]any{
+		"headline": legal.Headline,
+		"plain":    legal.Plain,
+		"formal":   legal.Formal,
+		"version":  legal.Version(),
+		"accepted": accepted,
+	})
+}
+
+func (s *Server) handleAcceptTerms(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.settings == nil {
+		http.Error(w, "settings unavailable, so acceptance cannot be recorded",
+			http.StatusServiceUnavailable)
+		return
+	}
+	v := s.settings.Get()
+	v.AcceptedTerms = legal.Version()
+	if err := s.settings.Set(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("terms: accepted (version %s)", legal.Version())
+	writeJSON(w, map[string]any{"accepted": true, "version": legal.Version()})
+}
+
+// tipInterval is how long a dismissal lasts.
+//
+// Slightly under a day, so the notice does not settle into a fixed hour that a
+// user with a routine never happens to be at the machine for. Long enough that
+// nobody meets it twice in a working day.
+const tipInterval = 20 * time.Hour
+
+// handleTip serves the contribution notice and whether now is a moment to show
+// it. The decision is made here rather than in the page so that a reload cannot
+// re-trigger it, and so the pacing survives somebody clearing browser storage.
+func (s *Server) handleTip(w http.ResponseWriter, r *http.Request) {
+	show := false
+	if s.settings != nil {
+		v := s.settings.Get()
+		// Never over the disclaimer. Being asked for money before being told
+		// the software is unfinished and unwarranted has the order of those two
+		// conversations exactly backwards.
+		accepted := v.AcceptedTerms == legal.Version()
+		due := time.Since(time.Unix(v.TipSnoozedUnix, 0)) >= tipInterval
+		show = accepted && !v.Contributor && due
+	}
+	writeJSON(w, map[string]any{
+		"headline": tip.Headline,
+		"body":     tip.Body,
+		"thanks":   tip.Dismissed,
+		"payPal":   tip.PayPal,
+		"contact":  tip.Contact,
+		"show":     show,
+		"monthly":  tip.MonthlyThreshold,
+		"credits":  tip.CreditsThreshold,
+	})
+}
+
+// handleDismissTip records either "not now" or "I contribute".
+//
+// The contributor claim is stored exactly as given. There is no verification
+// step and there is not going to be one; see internal/tip for why.
+func (s *Server) handleDismissTip(w http.ResponseWriter, r *http.Request) {
+	if s.settings == nil {
+		http.Error(w, "settings unavailable, so this cannot be recorded",
+			http.StatusServiceUnavailable)
+		return
+	}
+	v := s.settings.Get()
+	v.TipSnoozedUnix = time.Now().Unix()
+	if r.URL.Query().Get("contributor") == "1" {
+		v.Contributor = true
+	}
+	if err := s.settings.Set(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"contributor": v.Contributor})
+}
+
+// handleShutdown stops the agent, for somebody who read the terms and decided
+// no. Declining and then leaving the thing running would make the choice
+// meaningless.
+//
+// This adds no capability an attacker does not already have: anything holding
+// the API token runs as the same user and can simply kill the process.
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	log.Print("shutdown: requested from the dashboard")
+	writeJSON(w, map[string]any{"stopping": true})
+	go func() {
+		// Let the response reach the browser before the process goes away.
+		time.Sleep(400 * time.Millisecond)
+		if s.stop != nil {
+			s.stop()
+			return
+		}
+		os.Exit(0)
+	}()
 }
 
 type alertDTO struct {
@@ -606,6 +951,22 @@ func (s *Server) dashboardHandler(next http.Handler) http.Handler {
 		}
 		body := strings.Replace(string(page), "__NITEWATCH_TOKEN__", s.token.Value(), 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// Never cache this page. Two reasons, and the second is the serious one:
+		//
+		//   - It is served from an embedded filesystem whose modification time
+		//     is zero, so net/http emits no Last-Modified and no ETag. With no
+		//     validators and no freshness directives, a browser is free to keep
+		//     serving whatever it has — which is how somebody upgrades the agent
+		//     and still sees the previous version's interface.
+		//   - The page carries this run's API token, substituted above. A cached
+		//     copy holds a token from an earlier run, which is both a stale
+		//     credential sitting in the browser cache and a page that will fail
+		//     to authenticate after a restart.
+		//
+		// It is a small file served over loopback. There is nothing to gain by
+		// caching it and two distinct ways for it to go wrong.
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
 		_, _ = w.Write([]byte(body))
 	})
 }

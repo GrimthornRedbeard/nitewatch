@@ -72,8 +72,13 @@ func TestIntelHitFiresCriticalWithFilledNarrative(t *testing.T) {
 		t.Errorf("narrative not filled from match data:\n%s", narrative)
 	}
 	steps := d.Rule.RenderPlaybook(d.Fields)
-	if len(steps) == 0 || !strings.Contains(strings.Join(steps, " "), `Downloads\invoice.exe`) {
-		t.Errorf("playbook missing specifics: %+v", steps)
+	if len(steps) == 0 {
+		t.Error("playbook is empty")
+	}
+	// The path lives in evidence, which is what the dashboard's program box
+	// renders. Prose repeating it put the same string on screen twice.
+	if got, _ := d.Fields["ImagePath"].(string); !strings.Contains(got, `Downloads\invoice.exe`) {
+		t.Errorf("evidence ImagePath = %q, want the full path", got)
 	}
 }
 
@@ -320,5 +325,60 @@ func TestUnsignedBinaryDiallingBareAddressStillFires(t *testing.T) {
 	}
 	if d.Rule.Severity != rules.Medium {
 		t.Errorf("severity = %s, want medium — this is a prompt, not a finding", d.Rule.Severity)
+	}
+}
+
+// Verbatim from a live machine: "An unknown program connected to a numeric
+// address without looking it up ... software with no publisher, reaching an
+// address it never asked for by name."
+//
+// Both halves were unfounded. With no image the signature was never checked, so
+// "no publisher" reported a gap in our own data as evidence; and the reader was
+// left with "Do you recognise An unknown program?", which cannot be answered.
+func TestUnknownProgramDoesNotProduceProgramClaims(t *testing.T) {
+	e := New(loadEveryPack(t), nil)
+	subj := Subject{
+		Event: event.NormalizedEvent{Kind: event.KindNetConnect},
+		Conn: ledger.Connection{
+			Image: "", PID: 0, // never identified
+			RemoteIP: "2620:100:601f:17::a27d:911", RemotePort: 443,
+		},
+		Recon:  recon.Info{Org: "DROPBOX", Country: "US"},
+		HadDNS: false, FirstContact: true,
+	}
+	for _, id := range []string{"c2-raw-ip-no-dns", "c2-unsigned-first-contact", "c2-foreign-first-contact"} {
+		if d := find(e.Evaluate(subj), id); d != nil {
+			t.Errorf("%s fired for a program that was never identified:\n%s",
+				id, d.Rule.RenderNarrative(d.Fields))
+		}
+	}
+}
+
+// A known-bad destination still matters even when the program cannot be named —
+// that is the most certain finding the product has, and suppressing it would
+// hide the one thing worth acting on. It must simply not pretend to name a
+// program.
+func TestFeedHitStillFiresForAnUnknownProgram(t *testing.T) {
+	feeds := feedsWith(t, "203.0.113.99\n", intel.Source{
+		Name: "Test Feed", Kind: intel.KindIP,
+		Confidence: intel.Malicious, Reason: "a test entry",
+	})
+	e := New(loadEveryPack(t), feeds)
+	subj := Subject{
+		Event:        event.NormalizedEvent{Kind: event.KindNetConnect},
+		Conn:         ledger.Connection{Image: "", RemoteIP: "203.0.113.99", RemotePort: 443},
+		Recon:        recon.Info{Org: "SOME-HOST", Country: "RU"},
+		FirstContact: true,
+	}
+	d := find(e.Evaluate(subj), "c2-feed-flagged-connection")
+	if d == nil {
+		t.Fatal("a known-bad destination must still be reported")
+	}
+	text := d.Rule.RenderNarrative(d.Fields) + " " + strings.Join(d.Rule.RenderPlaybook(d.Fields), " ")
+	if strings.Contains(text, "An unknown program") {
+		t.Errorf("still using the old capitalised placeholder:\n%s", text)
+	}
+	if !strings.Contains(text, "could not identify which program") {
+		t.Errorf("should say plainly that the program is unknown:\n%s", text)
 	}
 }

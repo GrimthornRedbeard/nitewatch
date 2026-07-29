@@ -94,6 +94,10 @@ type Collector struct {
 	// per-ingest scratch, set before detection runs
 	lastID       gr.EventID
 	firstContact bool
+
+	// ledgerWriteFailed keeps a broken ledger from reporting itself once per
+	// connection. The first failure is the informative one.
+	ledgerWriteFailed bool
 }
 
 // New builds a collector with default options (skip local traffic, resolve names).
@@ -167,6 +171,15 @@ func (c *Collector) seedProcessTable() {
 		byPID[p.PID] = p
 	}
 	seeded := map[uint32]bool{}
+	// One instant for the whole seed, not time.Now() per process.
+	//
+	// These processes really started at some unknown point in the past, and the
+	// honest statement the timeline can make is "known to be running as of
+	// here". Using a single instant makes that consistent: every seeded tenure
+	// begins together, so an event from after the agent started resolves to the
+	// right one, and the ordering between seeded processes — which we do not
+	// actually know — is never implied.
+	seededAt := time.Now()
 	var seed func(p ProcInfo, depth int)
 	seed = func(p ProcInfo, depth int) {
 		if seeded[p.PID] || depth > 32 { // depth guard: PID tables can cycle
@@ -178,7 +191,7 @@ func (c *Collector) seedProcessTable() {
 		seeded[p.PID] = true
 		c.window.Ingest(event.NormalizedEvent{
 			Kind: event.KindProcStart, PID: p.PID, PPID: p.PPID,
-			Image: p.Image, Time: time.Now(),
+			Image: p.Image, Time: seededAt,
 		})
 		if len(p.Services) > 0 {
 			c.serviceNames[p.PID] = p.Services
@@ -284,7 +297,7 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		// Write the story as prose while the graph still holds the events. A
 		// list of steps asks the reader to assemble the meaning; a sentence
 		// hands it to them.
-		pctx := c.window.Current().ContextFor(e.PID)
+		pctx := c.window.Current().ContextAt(e.PID, e.Time)
 		st.Context = &pctx
 		st.Narrative = graph.Narrate(st, pctx, graph.Peer{
 			IP: peerIP, Port: peerPort, Domain: domain,
@@ -327,7 +340,17 @@ func (c *Collector) ingest(e event.NormalizedEvent) {
 		BytesSent:  e.BytesSent,
 		BytesRecv:  e.BytesRecv,
 	}
-	_ = c.ledger.RecordConnectionDedup(conn, c.dedupWindow())
+	// Not discarded. A ledger write is the whole product — a connection that
+	// fails to record is one the user will never see, and silence is how a
+	// malformed INSERT survived long enough to drop the byte counts on every
+	// flow's first sighting. Logged once per run so a persistent failure
+	// (a full disk, a locked database) is visible without filling the log
+	// at connection rate.
+	if err := c.ledger.RecordConnectionDedup(conn, c.dedupWindow()); err != nil && !c.ledgerWriteFailed {
+		c.ledgerWriteFailed = true
+		log.Printf("ledger: recording connections is FAILING (%v) — "+
+			"the connection list will be incomplete until this is fixed", err)
+	}
 
 	if c.opts.Detect != nil && !selfEvent {
 		c.runDetections(e, conn, info, domain)
@@ -362,7 +385,7 @@ func (c *Collector) runDetections(e event.NormalizedEvent, conn ledger.Connectio
 		FirstContact: c.firstContact,
 	}
 	c.suppress.Observe(conn.Image, e.Time)
-	connCtx := c.window.Current().ContextFor(e.PID)
+	connCtx := c.window.Current().ContextAt(e.PID, e.Time)
 	for _, d := range c.opts.Detect.Evaluate(subject) {
 		if v := c.suppress.Check(d, subject, e.Time); v.Suppressed {
 			continue
@@ -393,7 +416,7 @@ func imageFor(e event.NormalizedEvent, c *Collector) string {
 	if e.Image != "" {
 		return e.Image
 	}
-	if img := c.window.Current().ImageFor(e.PID); img != "" {
+	if img := c.window.Current().ImageAt(e.PID, e.Time); img != "" {
 		return img
 	}
 	return c.lookupImage(e.PID)

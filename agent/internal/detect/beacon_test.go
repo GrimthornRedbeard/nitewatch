@@ -144,3 +144,77 @@ func TestBeaconRuleFiresOnUnremarkableHosting(t *testing.T) {
 		t.Errorf("narrative should state the interval:\n%s", narrative)
 	}
 }
+
+// Regression from a live desktop, verbatim from the report: the Claude
+// Microsoft Store app checking in with api.anthropic.com every 6.8 seconds was
+// reported as command-and-control, with the narrative "a fixed rhythm means
+// something is asking for instructions on a schedule, which is how
+// remote-control malware stays in touch with whoever installed it."
+//
+// Three things were wrong with firing here, and each alone should have stopped
+// it: the binary is signed, 6.8s is heartbeat cadence rather than an implant's
+// sleep interval, and the destination is the publisher's own API.
+func TestSignedAppPollingItsVendorIsNotBeaconing(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	const image = `C:\Program Files\WindowsApps\Claude_1.24012.9.0_x64__pzs8sxrjxfjjc\app\claude.exe`
+
+	base := time.Now().Add(-10 * time.Minute)
+	for i := 0; i < 40; i++ { // well past MinBeaconSamples, perfectly regular
+		at := base.Add(time.Duration(float64(i)*6.8) * time.Second)
+		subj := Subject{
+			Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true, Signer: "Anthropic PBC"},
+			Conn: ledger.Connection{Image: image, RemoteIP: "160.79.104.10",
+				RemotePort: 443, LastSeen: at},
+			Recon:  recon.Info{Org: "ANTHROPIC", Country: "US"},
+			Domain: "api.anthropic.com", HadDNS: true,
+		}
+		if d := find(e.Evaluate(subj), "c2-beaconing"); d != nil {
+			t.Fatalf("signed app polling its own vendor fired c2-beaconing on sample %d", i)
+		}
+	}
+}
+
+// The floor must not be so high that it hides a real implant. An unsigned
+// binary from a temp directory on a steady two-minute schedule is the case the
+// detector exists for.
+func TestUnsignedImplantOnASlowScheduleStillFires(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	const image = `C:\Users\k\AppData\Local\Temp\sync-helper.exe`
+
+	base := time.Now().Add(-2 * time.Hour)
+	var fired bool
+	for i := 0; i < 40; i++ {
+		at := base.Add(time.Duration(i) * 2 * time.Minute)
+		subj := Subject{
+			Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: false},
+			Conn: ledger.Connection{Image: image, RemoteIP: "45.137.22.184",
+				RemotePort: 8443, LastSeen: at},
+			Recon: recon.Info{Org: "HOSTKEY-AS", Country: "NL"},
+		}
+		if d := find(e.Evaluate(subj), "c2-beaconing"); d != nil {
+			fired = true
+			break
+		}
+	}
+	if !fired {
+		t.Error("a steady unsigned two-minute beacon must still be caught")
+	}
+}
+
+// Sub-30s regularity is heartbeat cadence, not a schedule worth reporting —
+// even when the binary is unsigned.
+func TestFastPollingIsBelowTheFloor(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	base := time.Now().Add(-10 * time.Minute)
+	for i := 0; i < 40; i++ {
+		subj := Subject{
+			Event: event.NormalizedEvent{Kind: event.KindNetConnect},
+			Conn: ledger.Connection{Image: `C:\x\app.exe`, RemoteIP: "203.0.113.9",
+				RemotePort: 443, LastSeen: base.Add(time.Duration(i*7) * time.Second)},
+			Recon: recon.Info{Org: "EXAMPLE-AS"},
+		}
+		if d := find(e.Evaluate(subj), "c2-beaconing"); d != nil {
+			t.Fatalf("7-second polling fired at sample %d; that is a heartbeat", i)
+		}
+	}
+}

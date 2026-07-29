@@ -14,6 +14,7 @@ package respond
 
 import (
 	"fmt"
+	"github.com/threattape/nitewatch/agent/internal/detect"
 	"net"
 	"sort"
 	"strconv"
@@ -71,6 +72,21 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 
 	image := str(ev, "ImagePath")
 	proc := str(ev, "ProcessName")
+	// With no image the acting program was never identified — usually because
+	// it exited before the connection was recorded. Offering "Stop <it>" and
+	// "Quarantine <it>" then is offering to act on something we cannot name,
+	// and the button text reads as nonsense. Blocking the address still works,
+	// because that acts on the destination rather than the program.
+	if image == "" {
+		proc = ""
+	}
+	// "Stop System now (cannot be undone)" was being offered for the Windows
+	// kernel, alongside "Quarantine this program" for a thing that is not a
+	// file. Terminating PID 4 stops the computer; there is nothing to
+	// quarantine. Anything without a real path gets no program actions.
+	if !detect.ActionableImage(image) {
+		image, proc = "", ""
+	}
 	pid := str(ev, "PID")
 	ip := str(ev, "RemoteIP")
 	dest := str(ev, "Destination")

@@ -13,6 +13,7 @@ package settings
 import (
 	"database/sql"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,6 +31,23 @@ type Values struct {
 	DedupSeconds int `json:"dedupSeconds"`
 	// RetentionDays bounds how long connection history is kept.
 	RetentionDays int `json:"retentionDays"`
+	// VirusTotalKey enables the optional reputation check on a program's
+	// fingerprint. Empty by default: the feature does not exist until the user
+	// supplies their own key, so the account doing the asking is theirs.
+	VirusTotalKey string `json:"virusTotalKey"`
+	// AcceptedTerms records the version of the pre-release disclaimer the user
+	// accepted. Storing the version rather than a boolean means editing the
+	// terms re-prompts, instead of relying on consent given to different words.
+	AcceptedTerms string `json:"acceptedTerms"`
+	// Contributor records that the user says they contribute monthly, which
+	// retires the contribution notice permanently. Taken at face value: see
+	// internal/tip for why this is not verified.
+	Contributor bool `json:"contributor"`
+	// TipSnoozedUnix is when the contribution notice was last dismissed. Stored
+	// as an instant rather than a counter so the notice is paced by elapsed
+	// time, and a user who opens the dashboard forty times in an afternoon sees
+	// it once.
+	TipSnoozedUnix int64 `json:"tipSnoozedUnix"`
 }
 
 // Defaults are the shipped configuration.
@@ -110,11 +128,15 @@ func (s *Store) persist(v Values) error {
 	}
 	defer tx.Rollback()
 	for k, val := range map[string]string{
-		"includeLocal":  b2s(v.IncludeLocal),
-		"resolveNames":  b2s(v.ResolveNames),
-		"recon":         b2s(v.Recon),
-		"dedupSeconds":  strconv.Itoa(v.DedupSeconds),
-		"retentionDays": strconv.Itoa(v.RetentionDays),
+		"includeLocal":   b2s(v.IncludeLocal),
+		"resolveNames":   b2s(v.ResolveNames),
+		"recon":          b2s(v.Recon),
+		"dedupSeconds":   strconv.Itoa(v.DedupSeconds),
+		"retentionDays":  strconv.Itoa(v.RetentionDays),
+		"virusTotalKey":  v.VirusTotalKey,
+		"acceptedTerms":  v.AcceptedTerms,
+		"contributor":    b2s(v.Contributor),
+		"tipSnoozedUnix": strconv.FormatInt(v.TipSnoozedUnix, 10),
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)
@@ -147,6 +169,20 @@ func merge(base Values, stored map[string]string) Values {
 			out.RetentionDays = n
 		}
 	}
+	if v, ok := stored["virusTotalKey"]; ok {
+		out.VirusTotalKey = v
+	}
+	if v, ok := stored["acceptedTerms"]; ok {
+		out.AcceptedTerms = v
+	}
+	if v, ok := stored["contributor"]; ok {
+		out.Contributor = v == "1"
+	}
+	if v, ok := stored["tipSnoozedUnix"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			out.TipSnoozedUnix = n
+		}
+	}
 	return sanitize(out)
 }
 
@@ -154,6 +190,16 @@ func merge(base Values, stored map[string]string) Values {
 // a zero dedup window would flood the ledger, an unbounded one would merge
 // unrelated conversations.
 func sanitize(v Values) Values {
+	// Trim here rather than only on the way to disk. persist() trimmed, Set()
+	// did not, so the running agent kept whatever the caller sent while the
+	// database held the tidy version — and a VirusTotal key pasted with a
+	// trailing newline (the usual result of copying one from a web page) was
+	// rejected for the rest of the session, then silently started working after
+	// a restart. Same hazard for AcceptedTerms, where a stray space would fail
+	// the version comparison and re-prompt forever.
+	v.VirusTotalKey = strings.TrimSpace(v.VirusTotalKey)
+	v.AcceptedTerms = strings.TrimSpace(v.AcceptedTerms)
+
 	if v.DedupSeconds < 1 {
 		v.DedupSeconds = 1
 	}
