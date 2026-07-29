@@ -981,7 +981,21 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
       // Unnamed destinations sort last rather than first: a blank is the
       // absence of an answer, not an answer that sorts before "a".
       case "domain":   return (c.domain || "\uffff").toLowerCase();
-      default:         return String(c[k] ?? "\uffff").toLowerCase();
+      // Byte counts are numbers and must compare as numbers. Named explicitly
+      // rather than left to the default so that a missing value sorts as zero
+      // instead of falling through to the string branch.
+      case "bytesSent": return c.bytesSent || 0;
+      case "bytesRecv": return c.bytesRecv || 0;
+      default: {
+        // Type-aware, because the bug this replaces was not really about the
+        // two byte columns: the old default stringified everything, so ANY
+        // numeric column sorted lexicographically the moment somebody added
+        // one without also editing this function. Sorting by Sent put 8.0 KB
+        // after 40.0 MB, because "8200" > "41943040" as text.
+        const v = c[k];
+        if (typeof v === "number") return v;
+        return String(v ?? "\uffff").toLowerCase();
+      }
     }
   }
 
@@ -1678,20 +1692,46 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
       const k = c.image || "";
       let g = byImage.get(k);
       if (!g) {
-        g = {image: k, rows: [], sent: 0, recv: 0, dests: new Set(),
+        g = {image: k, rows: [], sent: 0, recv: 0, events: 0, dests: new Set(),
              countries: new Set(), last: "", flagged: false};
         byImage.set(k, g);
       }
       g.rows.push(c);
       g.sent += c.bytesSent || 0;
       g.recv += c.bytesRecv || 0;
+      g.events += c.events || 0;
       g.dests.add(c.domain || c.remoteIP);
       if (c.country) g.countries.add(c.country);
       const t = c.lastSeen || c.time;
       if (!g.last || t > g.last) g.last = t;
     }
-    // Busiest first by volume out, which is the column people scan for.
-    return [...byImage.values()].sort((a, b) => (b.sent + b.recv) - (a.sent + a.recv));
+    // Group order follows the chosen column. It used to be hardcoded to total
+    // volume regardless of what the user clicked, so in the default grouped
+    // view sorting by Sent appeared to do nothing at all — the header even drew
+    // its arrow — while only the rows inside each group moved.
+    //
+    // Not every column aggregates. A group has many destinations, addresses and
+    // countries, so "order groups by destination" has no meaning; those keep
+    // the volume ordering, which is the useful default and what the busiest-
+    // first behaviour was reaching for.
+    const totals = {
+      bytesSent: (g) => g.sent,
+      bytesRecv: (g) => g.recv,
+      events:    (g) => g.events,
+      lastSeen:  (g) => g.last,
+      image:     (g) => shortImage(g.image).toLowerCase(),
+    };
+    const pick = totals[sortKey];
+    const out = [...byImage.values()];
+    if (!pick) {
+      return out.sort((a, b) => (b.sent + b.recv) - (a.sent + a.recv));
+    }
+    return out.sort((a, b) => {
+      const x = pick(a), y = pick(b);
+      if (x < y) return sortDesc ? 1 : -1;
+      if (x > y) return sortDesc ? -1 : 1;
+      return 0;
+    });
   }
 
   function groupRow(g) {
