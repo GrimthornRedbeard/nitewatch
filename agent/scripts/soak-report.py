@@ -60,10 +60,21 @@ def main():
             log = ""
             out("could not read the log: %s" % e)
         if log:
-            for line in log.splitlines():
-                if "NiteWatch agent" in line:
-                    out("build:      %s" % line.split("NiteWatch agent")[-1].strip())
-                    break
+            # EVERY startup line, not the first. The log is appended across
+            # runs, so the first one can be weeks old — which is exactly how a
+            # report once claimed a soak had been produced by a build that
+            # predated half the fixes in it. The last line is the run that
+            # produced the data; the rest are history.
+            starts = [l for l in log.splitlines() if "NiteWatch agent" in l]
+            if starts:
+                out("build:      %s   <- the run that produced this"
+                    % starts[-1].split("NiteWatch agent")[-1].strip())
+                if len(starts) > 1:
+                    out("            (%d earlier starts in this log:)" % (len(starts) - 1))
+                    for l in starts[-6:-1]:
+                        out("              %s" % l.strip()[:110])
+                    out("            If the newest build above is not the one you")
+                    out("            expected, the soak measured something else.")
             # The failures worth knowing about before reading any numbers.
             bad = [l for l in log.splitlines() if re.search(
                 r"FAILING|panic|fatal|sensor unavailable|could not", l, re.I)]

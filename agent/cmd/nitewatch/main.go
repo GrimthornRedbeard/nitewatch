@@ -233,6 +233,21 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	if serve {
 		log.Printf("running; dashboard at http://%s (Ctrl+C to stop)", srv.Addr())
 		<-ctx.Done() // serving: run until interrupted
+
+		// Wait for the collector before returning, because returning fires the
+		// deferred led.Close() and the collector is still draining whatever it
+		// was holding. It used to race: every run ended with the last few
+		// connections dropped and "recording connections is FAILING (sql:
+		// database is closed)" in the log — which reads like a serious fault
+		// and is really just shutdown in the wrong order.
+		//
+		// Bounded, so a collector wedged on a slow write cannot hang the exit.
+		// Losing a few events beats refusing to close.
+		select {
+		case <-collErr:
+		case <-time.After(5 * time.Second):
+			log.Printf("shutdown: collector still busy after 5s; closing the ledger anyway")
+		}
 		return nil
 	}
 	// Not serving (e.g. replay-to-ledger): exit when the source is exhausted.
