@@ -18,6 +18,14 @@ import sqlite3
 import sys
 from collections import Counter, defaultdict
 
+# Windows consoles default to cp1252, which cannot encode an em-dash — and the
+# alert narratives are full of them. Without this the script dies partway
+# through printing, which is a rotten way to find out.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):  # very old Python, or a stream that cannot
+    pass                              # be reconfigured; the replace below still helps
+
 USER = re.compile(r"([A-Za-z]:\\Users\\)([^\\\s\"]+)", re.I)
 
 
@@ -30,7 +38,14 @@ def redact(text):
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    db = sqlite3.connect(sys.argv[1])
+    # Read-only, via a URI. The agent is probably still running against this
+    # file; a script that summarises it should not be able to alter it, and
+    # SQLite's WAL mode lets a reader in alongside the writer.
+    try:
+        db = sqlite3.connect("file:%s?mode=ro" % sys.argv[1].replace("?", "%3f"),
+                             uri=True)
+    except sqlite3.OperationalError as e:
+        sys.exit("could not open %s read-only: %s" % (sys.argv[1], e))
     db.row_factory = sqlite3.Row
 
     out = print
@@ -59,10 +74,23 @@ def main():
                     out("  %s" % l.strip()[:150])
 
     # ---- span ---------------------------------------------------------
-    row = db.execute(
-        "SELECT MIN(ts) a, MAX(ts) b, COUNT(*) n FROM connections").fetchone()
+    # SQLite opens lazily, so a read-only problem surfaces here rather than at
+    # connect(). The usual cause is the agent still running and holding the
+    # write-ahead log, which needs its -shm companion to attach a reader.
+    try:
+        row = db.execute(
+            "SELECT MIN(ts) a, MAX(ts) b, COUNT(*) n FROM connections").fetchone()
+    except sqlite3.OperationalError as e:
+        sys.exit(
+            "could not read %s: %s\n\n"
+            "If NiteWatch is still running, either stop it first, or copy all\n"
+            "three files somewhere and point this at the copy:\n"
+            "    nitewatch.db  nitewatch.db-wal  nitewatch.db-shm\n"
+            "Copying only the .db loses whatever has not been checkpointed yet,\n"
+            "which on a fresh soak can be most of it."
+            % (sys.argv[1], e))
     out("")
-    out("ledger:     %s connections, %s → %s" % (row["n"], row["a"], row["b"]))
+    out("ledger:     %s connections, %s to %s" % (row["n"], row["a"], row["b"]))
     procs = db.execute(
         "SELECT COUNT(DISTINCT image) n FROM connections").fetchone()["n"]
     dests = db.execute(
