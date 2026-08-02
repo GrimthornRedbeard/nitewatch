@@ -221,3 +221,87 @@ func TestFastPollingIsBelowTheFloor(t *testing.T) {
 		}
 	}
 }
+
+// The two beaconing alerts a real three-day soak produced. Both were correct
+// about the rhythm and wrong about what it meant.
+//
+// A browser is a user agent: contacting servers belonging to somebody else, on
+// a page's behalf, is its entire purpose. The "publisher must own the far end"
+// test that keeps a desktop app quiet is exactly backwards for one.
+func TestBrowsersPollingThirdPartiesAreNotBeaconing(t *testing.T) {
+	cases := []struct {
+		name     string
+		image    string
+		signer   string
+		ip, host string
+		org      string
+		every    float64 // seconds, as observed
+		samples  int
+	}{
+		{
+			// "msedge.exe is checking in with 1038.bm-nginx-loadbalancer...
+			// adnexus.net on a timer" — an ad exchange, on a 32.2s refresh.
+			name:   "Edge polling an ad exchange",
+			image:  `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+			signer: "Microsoft Corporation",
+			ip:     "68.67.176.83", host: "1038.bm-nginx-loadbalancer.mgmt.nym2.adnexus.net",
+			org: "ASN-APPNEX", every: 32.2, samples: 20,
+		},
+		{
+			// "chrome.exe is checking in with api.anthropic.com on a timer" —
+			// a Claude tab polling, caught at 45 check-ins. Raising the sample
+			// threshold would never have helped.
+			name:   "Chrome polling an API endpoint",
+			image:  `C:\Program Files\Google\Chrome\Application\chrome.exe`,
+			signer: "Google LLC",
+			ip:     "160.79.104.10", host: "api.anthropic.com",
+			org: "ANTHROPIC", every: 34.8, samples: 50,
+		},
+	}
+
+	for _, c := range cases {
+		e := New(loadShippedPack(t), nil)
+		base := time.Now().Add(-2 * time.Hour)
+		for i := 0; i < c.samples; i++ {
+			at := base.Add(time.Duration(float64(i)*c.every) * time.Second)
+			subj := Subject{
+				Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: true, Signer: c.signer},
+				Conn: ledger.Connection{Image: c.image, RemoteIP: c.ip,
+					RemotePort: 443, LastSeen: at},
+				Recon:  recon.Info{Org: c.org, Country: "US"},
+				Domain: c.host, HadDNS: true,
+			}
+			if d := find(e.Evaluate(subj), "c2-beaconing"); d != nil {
+				t.Errorf("%s: fired at sample %d of %d", c.name, i, c.samples)
+				break
+			}
+		}
+	}
+}
+
+// The pass is for browsers, not for anything that manages to look like one.
+// An unsigned binary calling itself chrome.exe and checking in on a schedule is
+// precisely the thing this detector exists to catch.
+func TestAnUnsignedProgramNamedChromeStillBeacons(t *testing.T) {
+	e := New(loadShippedPack(t), nil)
+	const image = `C:\Users\k\AppData\Local\Temp\chrome.exe`
+
+	base := time.Now().Add(-2 * time.Hour)
+	var fired bool
+	for i := 0; i < 40; i++ {
+		at := base.Add(time.Duration(i) * 45 * time.Second)
+		subj := Subject{
+			Event: event.NormalizedEvent{Kind: event.KindNetConnect, Signed: false},
+			Conn: ledger.Connection{Image: image, RemoteIP: "45.137.22.184",
+				RemotePort: 8443, LastSeen: at},
+			Recon: recon.Info{Org: "HOSTKEY-AS", Country: "NL"},
+		}
+		if d := find(e.Evaluate(subj), "c2-beaconing"); d != nil {
+			fired = true
+			break
+		}
+	}
+	if !fired {
+		t.Error("an unsigned impostor beaconing to a bulletproof host stayed silent")
+	}
+}

@@ -129,8 +129,23 @@ func detectCredentialTheft(s FileSubject) map[string]any {
 	if owner != "" && reader == strings.ToLower(owner) {
 		return nil
 	}
-	// Windows' own components and security software legitimately touch these.
-	if strings.HasPrefix(strings.ToLower(s.Image), `c:\windows\`) {
+	// Windows' own components legitimately touch these.
+	if pathIsUnderWindows(s.Image) {
+		return nil
+	}
+	// Anti-malware reads every file on the machine; that is the whole job. This
+	// used to be covered by the C:\Windows\ check above, which stopped being
+	// true when Defender moved to C:\ProgramData\Microsoft\Windows Defender\
+	// so its engine could update independently of the OS. A soak duly reported
+	// "MsMpEng.exe is reading your Firefox cookies" as critical.
+	if SecurityScanner(s.Image, s.Signed, s.Signer) {
+		return nil
+	}
+	// One browser reading another's store is the import feature. Every
+	// Chromium-derived browser offers to bring your passwords across, and the
+	// same soak flagged Brave sweeping Edge's User Data as an information
+	// stealer.
+	if BrowserImport(s.Image, s.Signed, s.Signer, owner) {
 		return nil
 	}
 	if s.Signed && TrustedSigner(s.Signer) && owner == "" {
@@ -144,4 +159,12 @@ func detectCredentialTheft(s FileSubject) map[string]any {
 		note = fmt.Sprintf("Only %s should be reading it.", owner)
 	}
 	return map[string]any{"SecretDescription": what, "OwnerNote": note}
+}
+
+// pathIsUnderWindows reports whether an image lives in the Windows directory.
+//
+// Named rather than inlined because it is load-bearing for a suppression that
+// silently stopped covering Defender, and a test now pins that fact.
+func pathIsUnderWindows(image string) bool {
+	return strings.HasPrefix(strings.ToLower(image), `c:\windows\`)
 }

@@ -206,6 +206,19 @@ func detectBeaconing(s Subject, e *Engine) map[string]any {
 	if s.Event.Signed && SignerMatchesOrg(s.Event.Signer, s.Recon.Org) {
 		return nil
 	}
+	// A browser is a user agent: contacting servers that belong to somebody
+	// else, on behalf of a page, is its entire purpose. The publisher-owns-the-
+	// far-end test above is exactly backwards for one — Edge talking to an ad
+	// exchange and Chrome talking to an API endpoint are both the product
+	// working, and a soak reported both as check-ins with remote-control
+	// infrastructure.
+	//
+	// Raising the sample count would not have helped: one of them was caught at
+	// 15 check-ins and the other at 45. The discriminator is not how often, it
+	// is who — which is why this is a predicate and not a threshold.
+	if Browser(s.Conn.Image, s.Event.Signed, s.Event.Signer) {
+		return nil
+	}
 	// A Store app polling on a timer is a Store app working. The package is
 	// signed and Microsoft-vetted even though the .exe carries no embedded
 	// signature for SignerMatchesOrg to compare.
