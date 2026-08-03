@@ -167,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
+	mux.HandleFunc("/api/summary", s.handleSummary)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -256,6 +257,17 @@ func (s *Server) ListenAndServe() error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return srv.ListenAndServe()
+}
+
+// handleSummary reports whole-ledger totals, so the dashboard's stat tiles can
+// describe the ledger rather than the page of it that was fetched.
+func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
+	sum, err := s.ledger.Summarise()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, sum)
 }
 
 func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {

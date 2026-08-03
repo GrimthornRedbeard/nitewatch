@@ -304,6 +304,9 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   .buildid { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
     background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 9px 12px; user-select: all; }
+  /* The table shows the newest N of possibly many more. Saying so is the
+     difference between a bounded view and a wrong one. */
+  .scope { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
   .footdocs { margin-top: 12px; display: flex; gap: 20px; flex-wrap: wrap; }
   .footdocs a { font-weight: 600; font-size: 14px; }
   .stepstoggle { margin-top: 14px; font-size: 15px; color: var(--accent);
@@ -690,6 +693,7 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   </table>
   </div>
   <div id="empty" class="empty" hidden>No connections recorded yet.</div>
+  <div id="scope" class="scope" hidden></div>
   <div class="foot"><b>Click a program name</b> for everything it is doing —
     what started it, everywhere it talks, how much it sends.
     <b>Click anywhere else in a row</b> for the chain of events behind that one
@@ -846,6 +850,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
 
 <script>
   let all = [];
+  // Whole-ledger totals from /api/summary. Empty until the first fetch; the
+  // tiles fall back to counting what they hold, so a slow or failed summary
+  // shows something rather than a dash.
+  let TOTALS = {};
   let LAST_ALERTS = [];
   let VT_KEY_SET = false;
   // Everything animated is gated on this, so the whole scheme honours the
@@ -1359,6 +1367,29 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     return frag;
   }
 
+  // How much of the ledger the table is actually showing.
+  //
+  // FETCH_LIMIT rows arrive; if the ledger holds more, the difference is
+  // invisible unless stated — and an invisible difference is how somebody
+  // concludes their machine made exactly one thousand connections.
+  const FETCH_LIMIT = 1000;
+  function paintTableScope(shown) {
+    const el = $("scope");
+    const total = TOTALS.connections;
+    if (!total || total <= shown) { el.hidden = true; return; }
+    const ev = (TOTALS.events && TOTALS.events > total)
+      ? " They collapse " + TOTALS.events.toLocaleString() + " connection events: " +
+        "repeat contact on one flow inside the de-duplication window counts once here."
+      : "";
+    el.textContent = "Showing the newest " + shown.toLocaleString() + " of " +
+      total.toLocaleString() + " recorded connections." + ev;
+    el.hidden = false;
+  }
+
+  async function refreshTotals() {
+    try { TOTALS = await getJSON("/api/summary"); } catch (e) { /* tiles fall back */ }
+  }
+
   // ── the contribution notice ───────────────────────────────────────
   // Shareware, including the part where it is dismissible and means it. The
   // pacing decision is the server's: a reload must not be able to re-trigger
@@ -1804,9 +1835,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     for (const tr of existing.values()) tr.remove();
 
     $("empty").hidden = rows.length > 0;
-    bumpStat($("c-total"), rows.length);
-    bumpStat($("c-talkers"), new Set(rows.map(c => c.image)).size);
-    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    bumpStat($("c-total"), TOTALS.connections ?? rows.length);
+    bumpStat($("c-talkers"), TOTALS.programs ?? new Set(rows.map(c => c.image)).size);
+    bumpStat($("c-domains"), TOTALS.destinations ?? new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    paintTableScope(rows.length);
     firstPaint = false;
   }
 
@@ -1861,9 +1893,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     for (const tr of existing.values()) tr.remove();
 
     $("empty").hidden = groups.length > 0;
-    bumpStat($("c-total"), rows.length);
-    bumpStat($("c-talkers"), groups.length);
-    bumpStat($("c-domains"), new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    bumpStat($("c-total"), TOTALS.connections ?? rows.length);
+    bumpStat($("c-talkers"), TOTALS.programs ?? groups.length);
+    bumpStat($("c-domains"), TOTALS.destinations ?? new Set(rows.map(c => c.domain || c.remoteIP)).size);
+    paintTableScope(rows.length);
     firstPaint = false;
   }
 
@@ -2786,7 +2819,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   async function refresh() {
     refreshAlerts();
     try {
-      const rows = await getJSON("/api/connections?limit=1000");
+      // Totals first, so the tiles are right on the very first paint rather
+      // than showing the fetched count for one cycle and then correcting.
+      await refreshTotals();
+      const rows = await getJSON("/api/connections?limit=" + FETCH_LIMIT);
       all = rows || [];
       paint();
     } catch (e) { /* keep last view on transient error */ }

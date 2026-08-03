@@ -417,3 +417,38 @@ func nullable(s string) any {
 	}
 	return s
 }
+
+// Summary counts the whole ledger, not the page of it somebody is looking at.
+//
+// The dashboard's stat tiles were computed from the rows it had fetched, which
+// are capped at a thousand. Past that the numbers stopped moving and nothing
+// said why — a counter that plateaus on a round number and does not admit it
+// undermines every other number beside it.
+type Summary struct {
+	Connections  int64 `json:"connections"`
+	Programs     int64 `json:"programs"`
+	Destinations int64 `json:"destinations"`
+	// Events is the number of connection events observed. Higher than
+	// Connections, because repeat contact on one flow inside the dedup window
+	// collapses into a single row with a counter rather than a new row.
+	Events int64 `json:"events"`
+	Alerts int64 `json:"alerts"`
+}
+
+// Summarise returns whole-ledger totals.
+func (d *DB) Summarise() (Summary, error) {
+	var s Summary
+	err := d.sql.QueryRow(`
+		SELECT COUNT(*),
+		       COUNT(DISTINCT image),
+		       COUNT(DISTINCT COALESCE(NULLIF(domain, ''), remote_ip)),
+		       COALESCE(SUM(events), 0)
+		FROM connections`).
+		Scan(&s.Connections, &s.Programs, &s.Destinations, &s.Events)
+	if err != nil {
+		return s, err
+	}
+	// A missing alerts table is not worth failing the whole summary over.
+	_ = d.sql.QueryRow(`SELECT COUNT(*) FROM alerts`).Scan(&s.Alerts)
+	return s, nil
+}

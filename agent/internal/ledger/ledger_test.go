@@ -4,6 +4,7 @@
 package ledger
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -401,5 +402,90 @@ func TestFirstSightingRecordsItsBytes(t *testing.T) {
 	if rows[0].BytesSent != sent+1_000 || rows[0].BytesRecv != recv+2_000 {
 		t.Errorf("after dedup: %d/%d, want %d/%d",
 			rows[0].BytesSent, rows[0].BytesRecv, sent+1_000, recv+2_000)
+	}
+}
+
+// The dashboard's stat tiles were computed from the page of rows it had
+// fetched, which is capped. Past the cap every tile stopped moving and nothing
+// said why — so a machine that had made 22,087 connections reported 1,000, and
+// kept reporting it.
+func TestSummariseCountsTheWholeLedgerNotAPage(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "sum.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	const flows = 1400 // more than any page the dashboard asks for
+	for i := 0; i < flows; i++ {
+		if err := db.RecordConnection(Connection{
+			Time: now.Add(time.Duration(i) * time.Second),
+			PID:  uint32(1000 + i%40), Image: fmt.Sprintf(`C:\App\p%d.exe`, i%40),
+			RemoteIP:   fmt.Sprintf("93.184.%d.%d", i/256%256, i%256),
+			RemotePort: 443, Proto: "TCP",
+			BytesSent: uint64(1000 + i), BytesRecv: uint64(5000 + i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s, err := db.Summarise()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Connections != flows {
+		t.Errorf("Connections = %d, want %d", s.Connections, flows)
+	}
+	if s.Programs != 40 {
+		t.Errorf("Programs = %d, want 40", s.Programs)
+	}
+	if s.Destinations != flows {
+		t.Errorf("Destinations = %d, want %d", s.Destinations, flows)
+	}
+
+	// And the page really is smaller, which is the whole point.
+	page, err := db.RecentConnections(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) >= int(s.Connections) {
+		t.Fatalf("the fetched page (%d) is not smaller than the ledger (%d); "+
+			"this test no longer exercises the case it was written for",
+			len(page), s.Connections)
+	}
+}
+
+// Rows are not connection events: repeat contact inside the dedup window
+// collapses into one row with a counter. A summary that conflated them would
+// under-report what the machine actually did.
+func TestSummariseSeparatesRowsFromEvents(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "ev.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	c := Connection{
+		Time: now, PID: 900, Image: `C:\App\chatty.exe`,
+		RemoteIP: "93.184.216.34", RemotePort: 443, Proto: "TCP",
+	}
+	for i := 0; i < 12; i++ { // one flow, repeatedly, inside the window
+		c.Time = now.Add(time.Duration(i) * time.Second)
+		if err := db.RecordConnectionDedup(c, 5*time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s, err := db.Summarise()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Connections != 1 {
+		t.Errorf("Connections = %d, want 1 collapsed row", s.Connections)
+	}
+	if s.Events != 12 {
+		t.Errorf("Events = %d, want 12 observed events", s.Events)
 	}
 }
