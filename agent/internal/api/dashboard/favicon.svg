@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="NiteWatch">
+  <!--
+    A lamp left on in a dark house, which is the metaphor the whole product
+    runs on: NiteWatch does not stand in front of anything, it just means you
+    can see who is at the door at 3am.
+
+    SVG rather than a bitmap .ico because the dashboard is a single embedded
+    file and a vector costs a few hundred bytes at every size. Kept to plain
+    shapes with no text — anything more detailed turns to mush at 16px, which
+    is the size that actually matters.
+  -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="52%">
+      <stop offset="0%" stop-color="#ffd08a"/>
+      <stop offset="55%" stop-color="#ffb454"/>
+      <stop offset="100%" stop-color="#ffb454" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#0b0f18"/>
+
+  <!-- The light itself, and the halo it throws. -->
+  <circle cx="32" cy="27" r="21" fill="url(#glow)" opacity=".55"/>
+  <circle cx="32" cy="27" r="9.5" fill="#ffd08a"/>
+
+  <!-- The beam falling on what is below it. Separate strokes rather than a
+       filled cone, which closes into a blob when scaled down — and heavier
+       than looks right at 128px, because a 4px stroke on a 64-unit canvas
+       renders at one physical pixel in a browser tab and simply disappears.
+       Drawn for the smallest size and allowed to look bold at the largest. -->
+  <path d="M18 45 L13 56 M46 45 L51 56" stroke="#ffb454" stroke-width="6.5"
+        stroke-linecap="round" opacity=".9"/>
+  <path d="M32 46 L32 57" stroke="#ffd08a" stroke-width="7"
+        stroke-linecap="round"/>
+</svg>

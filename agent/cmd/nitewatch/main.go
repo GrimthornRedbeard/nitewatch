@@ -47,7 +47,7 @@ import (
 	rulesdata "github.com/threattape/nitewatch/agent/rules"
 )
 
-var version = "0.1.5-pre"
+var version = "0.1.6-pre"
 
 // build is resolved once at startup. Go initialises it after version, since it
 // depends on it, so a version set at link time is still picked up.

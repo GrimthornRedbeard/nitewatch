@@ -168,6 +168,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/connections", s.handleConnections)
 	mux.HandleFunc("/api/talkers", s.handleTalkers)
 	mux.HandleFunc("/api/summary", s.handleSummary)
+	// A bare /favicon.ico request happens before the page is parsed, and on a
+	// restored tab it may happen without the page being parsed at all — so the
+	// <link> tag alone leaves a 404 in the console. There is no .ico to serve;
+	// 204 says so without the error. The real icon is favicon.svg, served from
+	// the embedded dashboard directory like everything else.
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
