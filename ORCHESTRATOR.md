@@ -78,39 +78,41 @@ _Assessed 2026-08-10. A gate is only green with evidence; an unknown gate is nev
 
 _Each entry stands on its own: you should be able to answer it without opening another file or remembering an issue number._
 
+_None open._
+
+## Decisions Resolved
+
+_Answered decisions, newest first. Kept rather than deleted: the record of what was decided and why is the point._
+
 ### Which comes first — the false-positive measurement, or the installer and Windows service that would make measuring it practical?
+
+- **Resolved 2026-08-10** by Kevin
+- **Decision:** Build the installer and Windows service first, then run the false-positive soak against a properly unattended agent.
+- **Why:** Kevin's call, against the audit's recommendation to soak first. Removes the top item on the shipped roadmap and the limitation the download page admits twice, makes the soak reliable and repeatable rather than a manual vigil, and unblocks relocating the SQLite ledger to %ProgramData% with an ACL. NOTE: service installation and elevation are precisely the paths that cannot be tested on WSL2, so this needs the Windows VM — which is also now approved for checkride, so one VM serves both.
+
 
 - **Status:** open · **Added:** unknown · **Reversible:** easily
 - **Blocked:** Nothing is hard-blocked — but the download page's 'nobody has measured how often it cries wolf' stays true until this is answered, and it is the stated reason the product cannot be recommended to anyone.
 
 **Background.** NiteWatch is currently a console application that a user starts by hand and that stops watching the moment the window closes. The shipped roadmap names two things as the next work: a measured false-positive rate ('nothing else on this list matters if the product cries wolf') and an installer that registers the agent as a Windows service. These are entangled. The false-positive number requires roughly a week of continuous quiet running on a real Windows desktop, which is exactly what a console app makes annoying — every reboot or accidental window close restarts the clock, and the one soak that has completed ran three days rather than seven. Kevin's own three-day soak in early August found five alerts, all false positives, which were traced to three specific causes and fixed on 2026-08-02 in commit d6179a6 (Windows Defender scanning credential stores from a ProgramData path the exclusion predicate did not cover, Chromium browsers importing each other's saved-password stores, and ordinary browser beaconing to ad and API endpoints). That was a genuinely good result — three fixable classes rather than random noise — but it measured the pre-fix build, so there is still no number describing how the shipped code behaves. Meanwhile the public download page tells every visitor the rate is unknown.
 
-**Options**
-
-| Option | Pros | Cons | Effort |
-|---|---|---|---|
-| Soak first on v0.1.6-pre as-is, accept the console-app friction | Costs no engineering time at all — it is Kevin leaving a window open. Produces the number that the product's own roadmap says gates everything else, and lets the download page's most damaging admission be replaced within about a week. Any false positives found feed straight into the next tuning pass. | Fragile: a reboot, a Windows update, or a closed console window silently truncates the run, and there is no way to tell a 7-day soak from a 7-day soak with three gaps in it. Consumes a week of calendar time during which no code ships. Only measures one machine — Kevin's — which is a sample of one for a consumer product. | weeks |
-| Build the installer and service first, then soak against a properly unattended agent | Removes the top item on the shipped roadmap's Next list and the limitation the download page admits twice. Makes the soak reliable and repeatable rather than a one-shot manual vigil, and unblocks the third Next item (moving the SQLite ledger into %ProgramData% with an ACL), which is explicitly gated on the installer existing. Also makes the product something a stranger could plausibly install, which is what would generate the outside feedback the project currently gets none of. | Delays the number that matters most by the length of the installer work. Windows service installation, elevation, and service lifecycle are precisely the code paths that cannot be tested on the WSL2 dev box, so it needs a Windows VM that does not exist yet. Risks shipping a service that runs unattended before anyone knows how noisy it is. | weeks |
-| Do neither yet — build the replayable false-positive regression suite from the traces already captured | Runs entirely on the dev box, needs no Windows VM and no calendar-week wait, and turns false-positive checking into a build gate that catches regressions forever rather than a measurement taken once. The soak-report tooling and replay source already exist. | Produces a regression guard, not a number — the download page's 'unmeasured' admission stays exactly as it is. A recorded trace from one machine also cannot surface false positives caused by software that machine does not run. Does not move the product any closer to something a stranger can install. | days |
-
 **Recommendation.** Soak first on v0.1.6-pre. It costs no engineering time, it is the only item that can retire the single worst sentence on the public download page, and the three-class retune means this is the first run whose result would actually mean something; the installer is a multi-week Windows-VM project that will still be there afterwards.
 
+
 ### How does Kevin find out whether anyone has actually downloaded and run NiteWatch, given that the product forbids the telemetry that would tell him?
+
+- **Resolved 2026-08-10** by Orchestrator (decide-and-document)
+- **Decision:** Check the server logs first — it is an hour of work and it converts a strategic question into an empirical one. Decide the rotation cadence after seeing whether the download count is zero, single digits, or something that justifies building the installer.
+- **Why:** Tactical under the root CLAUDE.md decide-and-document policy: no spend, no credentials, no external commitment, and reversible. Applied the audit's recommendation; raise it if you disagree.
+
 
 - **Status:** open · **Added:** unknown · **Reversible:** easily
 - **Blocked:** Nothing technical, but every roadmap priority above is being ranked on an assumption about audience size that nobody has tested, and the portfolio's zero-open-issues gate reads as a pass here for the wrong reason.
 
 **Background.** NiteWatch has been publicly downloadable from threattape.com since 2026-07-28 and is now on its sixth pre-release build. In that time zero GitHub issues have been filed — the repository has had exactly three issues ever, all opened by the development process itself and all closed by 2026-07-27. Three issue templates (bug, false-positive, config) were built specifically to receive outside reports and none has ever been used. The download page asks users to email threattape@gmail.com and calls that 'the most useful thing anyone can send me right now'. The product's hard constraint is that nothing about a user's machine is ever uploaded, so there is no phone-home, no update check, and no install counter — a constraint that was deliberately extended even to the shareware tip nag, which is unverified on purpose because checking would require a machine-identifying callback. The consequence is that 'zero open issues' — the portfolio's first ready-for-testing gate — carries no information here at all: it is equally consistent with a flawless product and with a product nobody has run. This matters for rotation planning, because NiteWatch keeps earning slots on the assumption there is an audience waiting on it.
 
-**Options**
-
-| Option | Pros | Cons | Effort |
-|---|---|---|---|
-| Read the web server access logs for download counts | Costs nothing, breaks no privacy promise — a request for a file on your own web server is not telemetry from the product, and the page already exists behind normal server logging. Answers the blunt question 'has anyone taken it' immediately, and distinguishes zero downloads from silent downloads, which are very different situations. | Counts downloads, not runs — someone who hits Smart App Control and cannot execute the file looks identical to a happy user. Says nothing about whether it produced false positives. Requires whatever log retention threattape.com's hosting actually keeps, which may be nothing. | hours |
-| Add a prominent in-app prompt asking for a report, with a pre-filled GitHub issue link | Puts the feedback ask where the user actually is rather than on a page they have already left, and the pre-filled link removes the friction of composing an email. Consistent with the privacy stance because the user presses the button. The dashboard already has a Limits and roadmap panel to hang it off. | Requires a GitHub account, which most consumer users of a personal security tool will not have. Adds a nag to a product that already has a tip nag. Still yields nothing if nobody is running it, so it does not answer the underlying question. | hours |
-| Accept that this is a build-in-public artifact with no measurable audience, and drop NiteWatch to a lower rotation cadence | Honest about the situation and frees rotation slots for the twenty-seven other projects. The product is feature-complete and publicly available; letting it sit costs nothing and it stays a credible portfolio piece. | Kills the momentum on the only consumer product in the portfolio, and does so on the basis of an absence of evidence that was never actually checked. The gap between 'feature complete' and 'installable by a stranger' is one installer wide, and abandoning it there wastes most of the value already built. | hours |
-
 **Recommendation.** Check the server logs first — it is an hour of work and it converts a strategic question into an empirical one. Decide the rotation cadence after seeing whether the download count is zero, single digits, or something that justifies building the installer.
+
 
 ## Rotation History
 
