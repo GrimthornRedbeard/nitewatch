@@ -58,9 +58,14 @@ id_ed25519
 .npmrc
 *.htpasswd
 
-# Security-scanner output. Reports quote the secrets they find, so committing
-# a report re-commits the secret -- votesecured had 14 real strings sitting in
-# test-results/gitleaks.json for exactly this reason.
+# Security-scanner output. A secrets scanner quotes the secrets it finds, so
+# committing its report re-commits the secret. Kept as a preventive rule: no
+# report in this portfolio was found to contain one of our own credentials.
+# (Correction 2026-08-11: an earlier version of this comment claimed
+# votesecured's committed Snyk reports held live SendGrid keys. They hold 16
+# SendGrid strings, but all 16 are third-party example-fix snippets from Snyk's
+# advisory database, harvested from two unrelated public repos. Not ours, not
+# rotatable by us. The rule is still worth having; the example was wrong.)
 *-scan-results*.json
 gitleaks.json
 qa-gitleaks*.json
