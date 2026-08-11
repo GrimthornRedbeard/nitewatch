@@ -28,3 +28,41 @@ nitewatch.db
 feeds/
 quarantine/
 ip2asn.tsv
+
+# Git's own credential store and netrc. threattape committed a real
+# .git-credentials once (2025-07-12, PAT since expired); every repo in the
+# portfolio would still allow it.
+.git-credentials
+.netrc
+_netrc
+
+# --- Credential hygiene (portfolio audit 2026-08-11) ---
+# Never commit secrets. `.git/info/exclude` is local-only and does not protect
+# a fresh clone, so these rules live here where they travel with the repo.
+.env
+.env.*
+!.env*.example
+!.env*.sample
+!.env*.template
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+key.properties
+credentials.json
+serviceAccount*.json
+id_rsa
+id_ed25519
+.npmrc
+*.htpasswd
+
+# Security-scanner output. Reports quote the secrets they find, so committing
+# a report re-commits the secret -- votesecured had 14 real strings sitting in
+# test-results/gitleaks.json for exactly this reason.
+*-scan-results*.json
+gitleaks.json
+qa-gitleaks*.json
+qa-semgrep*.json
+qa-trivy*.json
