@@ -236,3 +236,40 @@ func (c Context) Summary() string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// sshPort is the port that means "this is an SSH session".
+const sshPort = "22"
+
+// SSHPeersAt reports the destinations a process reached over SSH.
+//
+// Exists so a detector can tell the difference between a program that read an
+// SSH private key and a program that read an SSH private key AND then used it.
+// Those look identical on the file event alone, and the second is what every
+// terminal, Git client and remote-development tool does all day.
+//
+// Read from the poset's own event parameters rather than from the rendered
+// activity strings, because parsing a port back out of "192.168.1.69:22" is
+// the kind of shortcut that breaks the first time the display format changes.
+func (g *Graph) SSHPeersAt(pid uint32, when time.Time) []string {
+	occ, ok := g.procs.at(pid, when)
+	if !ok || occ.node == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range g.p.CausalDescendants(occ.node) {
+		if e.Name != "NetConnect" {
+			continue
+		}
+		if fmt.Sprintf("%v", e.Params["remotePort"]) != sshPort {
+			continue
+		}
+		ip := fmt.Sprintf("%v", e.Params["remoteIP"])
+		if ip == "" || ip == "<nil>" || seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		out = append(out, ip)
+	}
+	return out
+}

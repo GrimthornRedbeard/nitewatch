@@ -400,6 +400,21 @@ func fileScenarios(now time.Time) []fileScenario {
 		Why:    "Chrome reading Chrome's password file is Chrome working. Anything else reading it is how password stealers behave — and they are the most common consumer malware there is.",
 	}, cred})
 
+	// The same read, when the key was demonstrably used. Kept as its own drill
+	// because the two are one file event apart and the difference is the whole
+	// point: this one is what an SSH client does, and it is reported quietly.
+	sshUsed := detect.FileSubject{
+		PID: 424246, Image: drillExe,
+		Path:     `C:\Users\SelfTest\.ssh\id_ed25519`,
+		SSHPeers: []string{"192.168.1.69"},
+	}
+	out = append(out, fileScenario{Scenario{
+		RuleID: "ssh-key-in-use",
+		Title:  "A program used your SSH key to connect somewhere",
+		Real:   "A program read your SSH private key and then used it to log in to another machine.",
+		Why:    "That is what an SSH client does, so it is usually your own terminal or development tool. It is still worth seeing, because the same file read by something that never connects anywhere is theft — and you are the only one who knows which program you expected.",
+	}, sshUsed})
+
 	return out
 }
 

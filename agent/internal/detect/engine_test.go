@@ -17,6 +17,10 @@ import (
 
 // loadShippedPack exercises the real c2.yaml, so a broken shipped rule fails
 // the build rather than the user.
+// loadShippedPack loads ONLY the c2 pack, despite the name. Renaming it is a
+// wide diff across every test that uses it; saying so here is cheaper and
+// stops the next person concluding a rule is unbound when it simply is not in
+// this pack. That mistake cost half an hour.
 func loadShippedPack(t *testing.T) *rules.Set {
 	t.Helper()
 	data, err := os.ReadFile("../../rules/c2.yaml")

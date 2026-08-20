@@ -250,3 +250,18 @@ func ShadowCopyTool(image string) bool {
 	}
 	return false
 }
+
+// IsSSHPrivateKey reports whether a path is an SSH private key.
+//
+// Named rather than string-matched against the description, so a detector that
+// treats SSH keys specially cannot be broken by rewording a user-facing
+// sentence. The classification table is the single source of truth for what
+// counts as one.
+func IsSSHPrivateKey(path string) bool {
+	p := strings.ToLower(filepath.ToSlash(path))
+	p = strings.ReplaceAll(p, "/", `\`)
+	if sqliteSidecar(p) {
+		return false
+	}
+	return strings.Contains(p, `\.ssh\id_`)
+}

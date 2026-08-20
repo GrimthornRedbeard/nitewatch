@@ -22,6 +22,13 @@ type FileSubject struct {
 	Burst filewatch.Burst
 	// ToolRun is set when the acting process is a backup-destruction tool.
 	ToolRun string
+	// SSHPeers are hosts this process reached over SSH, from the causal graph.
+	//
+	// A program that read an SSH private key and a program that read one and
+	// then used it are indistinguishable on the file event alone. The second is
+	// what every terminal, Git client and remote-development tool does, and the
+	// graph already knows which happened.
+	SSHPeers []string
 }
 
 // EvaluateFile runs the file-activity detectors.
@@ -31,6 +38,7 @@ func (e *Engine) EvaluateFile(s FileSubject) []Detection {
 		"mass-encryption-suspected":     detectEncryptionSuspected,
 		"backup-destruction":            detectBackupDestruction,
 		"credential-access-by-stranger": detectCredentialTheft,
+		"ssh-key-read-then-used":        detectSSHKeyInUse,
 	}
 	var out []Detection
 	for name, det := range dets {
@@ -141,6 +149,13 @@ func detectCredentialTheft(s FileSubject) map[string]any {
 	if SecurityScanner(s.Image, s.Signed, s.Signer) {
 		return nil
 	}
+	// An SSH key that was read and then USED is a client connecting, not a
+	// thief collecting. Handed to a separate rule rather than silenced: the
+	// user still learns their key was read, with the reason attached and
+	// without the information-stealer framing. See detectSSHKeyInUse.
+	if sshKeyInUse(s) {
+		return nil
+	}
 	// One browser reading another's store is the import feature. Every
 	// Chromium-derived browser offers to bring your passwords across, and the
 	// same soak flagged Brave sweeping Edge's User Data as an information
@@ -167,4 +182,32 @@ func detectCredentialTheft(s FileSubject) map[string]any {
 // silently stopped covering Defender, and a test now pins that fact.
 func pathIsUnderWindows(image string) bool {
 	return strings.HasPrefix(strings.ToLower(image), `c:\windows\`)
+}
+
+// sshKeyInUse reports that this process read an SSH private key and also spoke
+// SSH — the signature of a client, not a collector.
+//
+// Deliberately requires BOTH. Reading the key alone stays a critical alert,
+// because that is exactly what an information stealer does, and an attacker
+// who wants this pass has to actually establish SSH sessions rather than
+// simply rename themselves.
+func sshKeyInUse(s FileSubject) bool {
+	return len(s.SSHPeers) > 0 && filewatch.IsSSHPrivateKey(s.Path)
+}
+
+// detectSSHKeyInUse fires where detectCredentialTheft deliberately stands down:
+// the key was read AND used. Lower severity, and the narrative says why.
+func detectSSHKeyInUse(s FileSubject) map[string]any {
+	what, _ := filewatch.CredentialInfo(s.Path)
+	if what == "" || !sshKeyInUse(s) {
+		return nil
+	}
+	if SystemProcess(s.Image) {
+		return nil
+	}
+	return map[string]any{
+		"SecretDescription": what,
+		"SSHPeer":           s.SSHPeers[0],
+		"SSHPeerCount":      len(s.SSHPeers),
+	}
 }

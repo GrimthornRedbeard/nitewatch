@@ -547,8 +547,12 @@ func (c *Collector) onFileEvent(e event.NormalizedEvent) {
 		// event, and waiting for a pattern would mean waiting until after the
 		// passwords were already taken.
 		signed, signer := c.signerOf(image)
+		// Hand the detector what the graph already knows: did this process
+		// actually speak SSH? A key read and a key read-then-used are the same
+		// file event and very different situations.
 		c.reportFile(detect.FileSubject{
 			PID: e.PID, Image: image, Path: e.Path, Signed: signed, Signer: signer,
+			SSHPeers: c.window.Current().SSHPeersAt(e.PID, e.Time),
 		}, e.Time)
 	case filewatch.UserDocument, filewatch.RansomNote:
 		burst := c.files.Record(e.PID, image, e.Path, e.Time)
