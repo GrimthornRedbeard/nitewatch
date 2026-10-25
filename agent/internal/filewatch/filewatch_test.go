@@ -291,7 +291,7 @@ func TestNoteAloneDoesNotConfirmRansomware(t *testing.T) {
 
 	// A note ALONGSIDE real encryption activity still confirms.
 	for i := 0; i < NoteCorroboration+1; i++ {
-		b = tr.Record(9, "evil.exe",
+		tr.Record(9, "evil.exe",
 			fmt.Sprintf(`C:\Users\k\Documents\d%d\f%d.docx`, i%3, i), now.Add(time.Duration(i)*time.Second))
 	}
 	b = tr.Record(9, "evil.exe", `C:\Users\k\Documents\HOW_TO_DECRYPT.txt`, now.Add(time.Minute/2))

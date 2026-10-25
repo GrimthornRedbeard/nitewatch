@@ -44,3 +44,22 @@ func TestFormatHostPortBracketsIPv6(t *testing.T) {
 		t.Fatalf("zero port: got %q", got)
 	}
 }
+
+// normalizeImagePath runs only behind the Windows ETW source, so without this
+// it had no coverage on the machine the suite runs on. Volume 3 maps to C:
+// because that is the system volume on most installs; any other volume keeps
+// its number rather than being given a letter nobody verified.
+func TestNormalizeImagePath(t *testing.T) {
+	cases := map[string]string{
+		`\Device\HarddiskVolume3\Windows\System32\svchost.exe`: `C:\Windows\System32\svchost.exe`,
+		`\Device\HarddiskVolume5\Games\launcher.exe`:           `Volume5:\Games\launcher.exe`,
+		`C:\Already\Normal.exe`:                                `C:\Already\Normal.exe`,
+		`\Device\HarddiskVolume33\x.exe`:                       `Volume33:\x.exe`,
+		``:                                                     ``,
+	}
+	for in, want := range cases {
+		if got := normalizeImagePath(in); got != want {
+			t.Errorf("normalizeImagePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
