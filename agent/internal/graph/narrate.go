@@ -78,11 +78,26 @@ func Narrate(story Story, ctx Context, peer Peer) string {
 	return out
 }
 
-// programName prefers the process the connection belongs to.
+// programName names the process the connection belongs to.
+//
+// It must not settle for "the latest step that has a name". The chain also
+// holds whoever resolved the address — often a different program, since the
+// most recent lookup of a shared CDN address wins — and live network events
+// carry no image of their own, so walking back from the connection lands on
+// that other program. Only the connection's own image, its own process, or
+// the context built for its PID may name it.
 func programName(story Story, ctx Context) string {
-	for i := len(story.Steps) - 1; i >= 0; i-- {
-		if story.Steps[i].Source != "" {
-			return story.Steps[i].Source
+	if n := len(story.Steps); n > 0 {
+		anchor := story.Steps[n-1]
+		if anchor.Source != "" {
+			return anchor.Source
+		}
+		if anchor.PID != 0 {
+			for _, s := range story.Steps {
+				if s.Kind == "ProcStart" && s.PID == anchor.PID && s.Source != "" {
+					return s.Source
+				}
+			}
 		}
 	}
 	if n := len(ctx.Lineage); n > 0 {
@@ -91,11 +106,18 @@ func programName(story Story, ctx Context) string {
 	return "A program"
 }
 
-// lookedUp returns the name resolved on the way to this connection, if the
-// chain contains one.
+// lookedUp returns the name the connecting program itself resolved on the way
+// to this connection. A lookup made by a different process is where the
+// address came from, but saying "It looked up ..." would credit the subject
+// with something it did not do, so that case says nothing.
 func lookedUp(story Story) string {
+	n := len(story.Steps)
+	if n == 0 {
+		return ""
+	}
+	dialer := story.Steps[n-1].PID
 	for _, s := range story.Steps {
-		if s.Kind == "DNSQuery" && s.Detail != "" {
+		if s.Kind == "DNSQuery" && s.Detail != "" && s.PID == dialer {
 			return s.Detail
 		}
 	}
