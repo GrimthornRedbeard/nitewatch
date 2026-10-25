@@ -123,7 +123,9 @@ func Build(conns []ledger.Connection, host, agent string, now time.Time) Export 
 			}
 		}
 
-		if c.Story != "" {
+		// Only a story that parsed: one corrupt row embedded as raw JSON would
+		// make the whole document fail to marshal, losing every other record.
+		if ok {
 			ex.Stories = append(ex.Stories, Story{
 				ConnectionID: c.ID, SrcHost: host, Dst: dst, Port: c.RemotePort,
 				Story: json.RawMessage(c.Story),

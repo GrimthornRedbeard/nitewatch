@@ -140,3 +140,16 @@ func TestEmptyExportUsesEmptyListsNotNull(t *testing.T) {
 		}
 	}
 }
+
+func TestOneCorruptStoryDoesNotSinkTheExport(t *testing.T) {
+	ex := Build([]ledger.Connection{
+		{ID: 1, PID: 5, Image: "a.exe", RemoteIP: "192.0.2.1", RemotePort: 443, Story: `{"steps":[`},
+		{ID: 2, PID: 6, Image: "b.exe", RemoteIP: "192.0.2.2", RemotePort: 443, Story: `{"steps":[]}`},
+	}, "h", "", now)
+	if _, err := json.Marshal(ex); err != nil {
+		t.Fatalf("export failed to marshal: %v", err)
+	}
+	if len(ex.Stories) != 1 || ex.Stories[0].ConnectionID != 2 || len(ex.Events) != 2 {
+		t.Fatalf("want the corrupt story skipped and everything else kept: %+v", ex)
+	}
+}
