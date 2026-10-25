@@ -151,3 +151,23 @@ func TestFeedScenarioIsSkippedNotFailedWhenFeedsAreOff(t *testing.T) {
 		t.Error("feed scenario missing from the result entirely")
 	}
 }
+
+// "Test me" is a button; people press it more than once. The beacon tracker
+// latches per program+destination after its first alert, and the drill reuses
+// the same program and destination every time, so before this was fixed every
+// press after the first reported the beaconing rule as broken on a working
+// agent — the one outcome a self-test must never produce.
+func TestSelfTestPassesWhenRunAgainOnTheSameEngine(t *testing.T) {
+	e, feeds, _ := engine(t)
+	now := time.Now()
+	for run := 1; run <= 3; run++ {
+		var rec capture
+		res, err := Run(e, feeds, &rec, now.Add(time.Duration(run)*time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.OK() {
+			t.Fatalf("run %d: %s", run, Describe(res))
+		}
+	}
+}

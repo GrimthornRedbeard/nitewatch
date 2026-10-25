@@ -4,6 +4,7 @@
 package graph
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -79,5 +80,58 @@ func TestStoryForUnknownEventIsEmpty(t *testing.T) {
 	g := New()
 	if s := g.StoryFor("no-such-event"); len(s.Steps) != 0 || s.Mermaid != "" {
 		t.Fatalf("unknown id should yield an empty story, got %+v", s)
+	}
+}
+
+// Steps are Lamport-ordered, and Lamport order is not causation. When the name
+// a program dialed was looked up by a DIFFERENT program, the lookup belongs in
+// the story (it is where the address came from) but the dialing program did not
+// cause it. Edges must say exactly that; the old Mermaid, which joined steps in
+// order, drew the resolver as the dialer's parent.
+func TestStoryEdgesAreThePosetsEdgesNotTheStepOrder(t *testing.T) {
+	g := New()
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: 10, Image: `C:\Windows\explorer.exe`})
+	g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindProcStart, PID: 20, PPID: 10, Image: `C:\Tools\updater.exe`})
+	g.Ingest(event.NormalizedEvent{Seq: 3, Kind: event.KindProcStart, PID: 30, Image: `C:\Tools\resolver.exe`})
+	g.Ingest(event.NormalizedEvent{Seq: 4, Kind: event.KindDNSQuery, PID: 30,
+		QueryName: "cdn.test", Answers: []string{"203.0.113.9"}})
+	conn := g.Ingest(event.NormalizedEvent{Seq: 5, Kind: event.KindNetConnect, PID: 20,
+		RemoteIP: "203.0.113.9", RemotePort: 443})
+
+	story := g.StoryFor(conn)
+	if story.Schema != StorySchema {
+		t.Fatalf("schema = %q, want %q", story.Schema, StorySchema)
+	}
+	idx := map[string]int{}
+	for i, s := range story.Steps {
+		idx[s.Kind+":"+s.Source+":"+s.Detail] = i
+	}
+	explorer := idx["ProcStart:explorer.exe:pid 10"]
+	updater := idx["ProcStart:updater.exe:pid 20"]
+	resolver := idx["ProcStart:resolver.exe:pid 30"]
+	dns := idx["DNSQuery::cdn.test"]
+	dial := idx["NetConnect::203.0.113.9:443"]
+
+	want := map[Edge]bool{
+		{From: explorer, To: updater}: true,
+		{From: updater, To: dial}:     true,
+		{From: resolver, To: dns}:     true,
+		{From: dns, To: dial}:         true,
+	}
+	if len(story.Edges) != len(want) {
+		t.Fatalf("edges = %+v, want exactly %v", story.Edges, want)
+	}
+	for _, e := range story.Edges {
+		if !want[e] {
+			t.Errorf("edge %d->%d (%s -> %s) is not in the poset",
+				e.From, e.To, story.Steps[e.From].Kind, story.Steps[e.To].Kind)
+		}
+	}
+	// The resolver did not spawn or cause the updater; nothing may say so.
+	if strings.Contains(story.Mermaid, fmt.Sprintf("n%d --> n%d", resolver, updater)) {
+		t.Errorf("Mermaid draws the resolver as the updater's cause:\n%s", story.Mermaid)
+	}
+	if story.Steps[updater].PID != 20 || story.Steps[updater].Image != `C:\Tools\updater.exe` {
+		t.Errorf("process step lost its identity: %+v", story.Steps[updater])
 	}
 }

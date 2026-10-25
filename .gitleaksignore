@@ -1,0 +1,3 @@
+# A synthetic ETW file key (a fake kernel pointer, 0xFFFF...) in a test of
+# handle recycling. Not a credential. Reviewed 2026-10-25.
+12677f9569fadaad729f680afef5ba782865bf33:agent/internal/source/namecache_test.go:generic-api-key:15

@@ -117,3 +117,35 @@ func TestNarrateOmitsLookupWhenNoneObserved(t *testing.T) {
 		t.Errorf("no lookup was observed, so none should be claimed:\n%s", text)
 	}
 }
+
+// Shared CDN addresses mean the lookup that produced an address is often some
+// OTHER program's: dnsByIP keeps the most recent resolution by anyone. That
+// lookup and its lineage then sit in the chain, and live network events carry
+// no image of their own. The narrative must still name the program that
+// connected, and must not claim it made a lookup it did not make.
+func TestNarrateNamesTheDialerNotWhoeverResolvedTheAddress(t *testing.T) {
+	g := New()
+	now := time.Now()
+	g.Ingest(event.NormalizedEvent{Seq: 1, Kind: event.KindProcStart, PID: 20,
+		Image: `C:\Tools\updater.exe`, Time: now})
+	g.Ingest(event.NormalizedEvent{Seq: 2, Kind: event.KindProcStart, PID: 40,
+		Image: `C:\Windows\services.exe`, Time: now})
+	g.Ingest(event.NormalizedEvent{Seq: 3, Kind: event.KindProcStart, PID: 30, PPID: 40,
+		Image: `C:\Program Files\Browser\browser.exe`, Time: now.Add(time.Second)})
+	g.Ingest(event.NormalizedEvent{Seq: 4, Kind: event.KindDNSQuery, PID: 30, Image: `C:\Program Files\Browser\browser.exe`,
+		QueryName: "cdn.test", Answers: []string{"203.0.113.9"}, Time: now.Add(2 * time.Second)})
+	conn := g.Ingest(event.NormalizedEvent{Seq: 5, Kind: event.KindNetConnect, PID: 20,
+		RemoteIP: "203.0.113.9", RemotePort: 443, Time: now.Add(3 * time.Second)})
+
+	text := Narrate(g.StoryFor(conn), g.ContextAt(20, now.Add(3*time.Second)),
+		Peer{IP: "203.0.113.9", Port: 443, Domain: "cdn.test"})
+	if !strings.HasPrefix(text, "updater.exe ") {
+		t.Errorf("narrative must be about updater.exe, the program that connected:\n%s", text)
+	}
+	if strings.Contains(text, "browser.exe") {
+		t.Errorf("narrative names browser.exe, which only resolved the address:\n%s", text)
+	}
+	if strings.Contains(text, "looked up") {
+		t.Errorf("updater.exe made no lookup; the narrative says it did:\n%s", text)
+	}
+}

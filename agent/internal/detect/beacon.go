@@ -166,6 +166,25 @@ func analyseRhythmN(times []time.Time, minSamples int) (Beacon, bool) {
 	}, true
 }
 
+// beaconKey identifies one flow: a program talking to one destination.
+func beaconKey(s Subject) string {
+	dest := s.Domain
+	if dest == "" {
+		dest = s.Conn.RemoteIP
+	}
+	return s.Conn.Image + "|" + dest
+}
+
+// ForgetBeacon drops the rhythm history, and the already-alerted latch, for the
+// flow this subject belongs to. The self-test needs it: its drill reuses one
+// program and destination, and without a reset the latch from the first run
+// stops every later run from firing.
+func (e *Engine) ForgetBeacon(s Subject) {
+	if e.beacon != nil {
+		e.beacon.Forget(beaconKey(s))
+	}
+}
+
 // Forget drops a flow's history.
 func (t *BeaconTracker) Forget(key string) {
 	t.mu.Lock()
@@ -225,11 +244,7 @@ func detectBeaconing(s Subject, e *Engine) map[string]any {
 	if ClassifyInstall(s.Conn.Image, s.Event.Signed, s.Event.Signer).Store {
 		return nil
 	}
-	dest := s.Domain
-	if dest == "" {
-		dest = s.Conn.RemoteIP
-	}
-	b, ok := e.beacon.Observe(s.Conn.Image+"|"+dest, s.Conn.LastSeen)
+	b, ok := e.beacon.Observe(beaconKey(s), s.Conn.LastSeen)
 	if !ok {
 		return nil
 	}

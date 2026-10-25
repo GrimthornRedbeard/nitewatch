@@ -84,8 +84,9 @@ func servicesByPID() map[uint32][]string {
 	defer windows.CloseServiceHandle(m)
 
 	var needed, returned, resume uint32
-	// First call sizes the buffer.
-	err = windows.EnumServicesStatusEx(m, windows.SC_ENUM_PROCESS_INFO,
+	// First call sizes the buffer. It is expected to fail with
+	// ERROR_MORE_DATA; only `needed` matters, so the error is not read.
+	_ = windows.EnumServicesStatusEx(m, windows.SC_ENUM_PROCESS_INFO,
 		windows.SERVICE_WIN32, windows.SERVICE_STATE_ALL,
 		nil, 0, &needed, &returned, &resume, nil)
 	if needed == 0 {

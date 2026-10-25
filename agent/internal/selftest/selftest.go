@@ -158,6 +158,8 @@ func Run(e *detect.Engine, feeds *intel.Store, rec Recorder, now time.Time) (Res
 		// tracker the earlier check-ins so the final evaluation sees a pattern
 		// exactly as it would after a real program had been running a while.
 		if s.RuleID == "c2-beaconing" {
+			// Start from a clean flow: a previous drill left this one latched.
+			e.ForgetBeacon(subj)
 			// One fewer than the minimum: the tracker fires on the sample that
 			// reaches the threshold and then latches, so the scored evaluation
 			// below must be the one that completes the rhythm.
