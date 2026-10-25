@@ -842,9 +842,10 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
     <div class="lookup" id="story-lookup"></div>
     <div class="stepstoggle" id="story-toggle">Show the individual events</div>
     <div id="story-steps-wrap" hidden><ol class="chain" id="story-chain"></ol></div>
-    <p class="why">This chain is reconstructed from the causal event graph — each step is
-      an event that <em>caused</em> the next, ordered by logical (Lamport) clock rather than
-      wall-clock time.</p>
+    <p class="why">This chain is reconstructed from the causal event graph — every step is
+      part of what led to this connection, listed in logical (Lamport) order rather than
+      wall-clock time. A step is not necessarily the direct cause of the one below it: the
+      lookup that produced an address, for instance, may have been made by another program.</p>
     <div style="margin-top:14px"><button class="btn" id="story-close">Close</button></div>
   </div>
 </div>
