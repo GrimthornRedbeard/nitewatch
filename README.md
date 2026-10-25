@@ -90,6 +90,12 @@ and an old build of old code look the same. To check what a binary actually is:
 go version -m dist/nitewatch.exe | grep vcs
 ```
 
+**Build releases from the main checkout, not a `git worktree`.** Go recognises a
+git repository only by a `.git` *directory*; a worktree has a `.git` *file*, so
+Go walks past it and stamps whatever repository encloses it — on the dev box,
+the unrelated parent repo. The build still works; its `vcs.revision` is simply
+wrong, and so is the "quote this in any bug report" line.
+
 The running agent reports the same identity in its About panel, which is the
 only way to check on a machine without Go.
 
@@ -112,6 +118,17 @@ Useful flags: `--no-feeds` (skip threat-intel downloads), `--no-recon` (skip the
 address-ownership dataset), `--rules <dir>` (load rule packs from disk during
 development). Everything else is configured from the dashboard's Settings panel.
 
+**Export for Keystone** — write the ledger as a file Keystone (the Threat Tape
+correlation tier) can ingest, then exit. Nothing is sent anywhere:
+
+```bash
+./nitewatch -db nitewatch.db -export-keystone export.json
+```
+
+The format, the versioned causal-chain ("Story") contract it carries, and the
+contract test against Keystone's parser are in
+[docs/story-format.md](docs/story-format.md).
+
 ## Layout
 
 ```
@@ -120,7 +137,8 @@ agent/
   internal/
     source/          telemetry: Windows ETW, and a JSONL replay source for tests
     event/           the source-agnostic event vocabulary
-    graph/           causal event graph (GoRapide poset) + rolling window
+    graph/           causal event graph (GoRapide poset) + rolling window + Story
+    keystone/        ledger -> Keystone ingest file (docs/story-format.md)
     ledger/          SQLite flight recorder: connections, alerts, actions
     detect/          detection engine, detectors, suppression gates
     filewatch/       file classification and encryption-burst tracking

@@ -19,7 +19,17 @@ import (
 // caused this connection?" — the browser that spawned the helper that resolved
 // the name that produced the address this program dialed.
 type Story struct {
-	Steps   []Step `json:"steps"`
+	// Schema names the version of this shape. Stories recorded before it existed
+	// have no schema and no edges; readers must treat both as optional. See
+	// docs/story-format.md, which is the contract other products read.
+	Schema string `json:"schema,omitempty"`
+	Steps  []Step `json:"steps"`
+	// Edges are the poset's direct causal edges between Steps, as indices into
+	// Steps. They are the real graph: Steps alone is a Lamport-ordered list, and
+	// two adjacent steps are not necessarily cause and effect — the lookup that
+	// produced an address may have been made by a different program than the one
+	// that dialed it.
+	Edges   []Edge `json:"edges,omitempty"`
 	Mermaid string `json:"mermaid"`
 	// Narrative is the chain written as prose. Stored rather than regenerated
 	// so the account of an event never changes after the fact.
@@ -29,12 +39,25 @@ type Story struct {
 	Context *Context `json:"context,omitempty"`
 }
 
+// StorySchema is the version stamped on every Story recorded from now on.
+const StorySchema = "nitewatch.story/v1"
+
 // Step is one event in the causal chain, in happens-before order.
 type Step struct {
 	Kind    string `json:"kind"`
 	Source  string `json:"source"`
 	Detail  string `json:"detail"`
 	Lamport uint64 `json:"lamport"`
+	// PID and Image identify the process the event belongs to. Source is the
+	// display form of Image; Image is the full path a consumer can match on.
+	PID   uint32 `json:"pid,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+// Edge is one direct causal edge: Steps[From] caused Steps[To].
+type Edge struct {
+	From int `json:"from"`
+	To   int `json:"to"`
 }
 
 // StoryFor walks the causal ancestors of an event and renders them as an
@@ -64,17 +87,48 @@ func (g *Graph) StoryFor(id gr.EventID) Story {
 		return nodes[i].Name < nodes[j].Name
 	})
 
-	st := Story{Steps: make([]Step, 0, len(nodes))}
+	index := make(map[gr.EventID]int, len(nodes))
+	for i, e := range nodes {
+		index[e.ID] = i
+	}
+
+	st := Story{Schema: StorySchema, Steps: make([]Step, 0, len(nodes))}
 	for _, e := range nodes {
 		st.Steps = append(st.Steps, Step{
 			Kind:    e.Name,
 			Source:  shortName(e.Source),
 			Detail:  detailOf(e),
 			Lamport: e.Clock.Lamport,
+			PID:     pidOf(e),
+			Image:   e.Source,
 		})
 	}
-	st.Mermaid = mermaidChain(nodes)
+	// The chain is the anchor plus ALL its ancestors, so every direct
+	// predecessor of a chain node is itself in the chain; the lookup never
+	// misses. Sorted so the same poset always serializes to the same bytes.
+	for to, e := range nodes {
+		for _, pred := range g.p.DirectPredecessors(e.ID) {
+			if from, ok := index[pred]; ok {
+				st.Edges = append(st.Edges, Edge{From: from, To: to})
+			}
+		}
+	}
+	sort.Slice(st.Edges, func(i, j int) bool {
+		if st.Edges[i].To != st.Edges[j].To {
+			return st.Edges[i].To < st.Edges[j].To
+		}
+		return st.Edges[i].From < st.Edges[j].From
+	})
+	st.Mermaid = mermaidChain(nodes, st.Edges)
 	return st
+}
+
+// pidOf reads the PID parameter Ingest stored on every event.
+func pidOf(e *gr.Event) uint32 {
+	if v, ok := e.Params["pid"].(uint32); ok {
+		return v
+	}
+	return 0
 }
 
 // detailOf renders the interesting parameter of an event for display.
@@ -110,7 +164,11 @@ func detailOf(e *gr.Event) string {
 // mermaidChain renders the causal chain as a Mermaid flowchart. GoRapide ships
 // a whole-poset Mermaid exporter; we render just this subgraph so the UI shows
 // one story rather than the entire machine's activity.
-func mermaidChain(nodes []*gr.Event) string {
+//
+// Arrows are the poset's edges. An earlier version joined the steps in Lamport
+// order instead, which drew a chain of cause and effect between events that
+// were merely ordered — the same misattribution the Edges field exists to stop.
+func mermaidChain(nodes []*gr.Event, edges []Edge) string {
 	if len(nodes) == 0 {
 		return ""
 	}
@@ -126,8 +184,8 @@ func mermaidChain(nodes []*gr.Event) string {
 		}
 		fmt.Fprintf(&b, "  n%d[\"%s\"]\n", i, escapeMermaid(label))
 	}
-	for i := 1; i < len(nodes); i++ {
-		fmt.Fprintf(&b, "  n%d --> n%d\n", i-1, i)
+	for _, e := range edges {
+		fmt.Fprintf(&b, "  n%d --> n%d\n", e.From, e.To)
 	}
 	return b.String()
 }

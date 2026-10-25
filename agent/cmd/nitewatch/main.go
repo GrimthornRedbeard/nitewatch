@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/collector"
 	"github.com/threattape/nitewatch/agent/internal/detect"
 	"github.com/threattape/nitewatch/agent/internal/intel"
+	"github.com/threattape/nitewatch/agent/internal/keystone"
 	"github.com/threattape/nitewatch/agent/internal/ledger"
 	"github.com/threattape/nitewatch/agent/internal/legal"
 	"github.com/threattape/nitewatch/agent/internal/notify"
@@ -74,8 +76,22 @@ func main() {
 		noRecon      = flag.Bool("no-recon", false, "disable the offline IP-ownership dataset (no download)")
 		noFeeds      = flag.Bool("no-feeds", false, "disable threat-intel feed downloads (rules still run)")
 		rulesDir     = flag.String("rules", "", "load rule packs from this directory instead of the built-in set")
+		exportPath   = flag.String("export-keystone", "", "write the ledger as a Keystone ingest file (\"-\" for stdout) and exit")
+		exportHost   = flag.String("export-host", "", "host name to stamp on the export (default: this machine's name)")
+		exportLimit  = flag.Int("export-limit", 10000, "most recent ledger rows to include in the export")
 	)
 	flag.Parse()
+
+	// An export is a one-shot read of the ledger. It starts no sensor, server or
+	// feed download, and it sends nothing anywhere: it writes a file the user
+	// asked for, and what happens to that file is the user's decision.
+	if *exportPath != "" {
+		if err := exportKeystone(*dbPath, *exportPath, *exportHost, *exportLimit); err != nil {
+			fmt.Fprintf(os.Stderr, "export: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	closeLog := setupLogging()
 	defer closeLog()
@@ -127,6 +143,44 @@ func main() {
 		holdOpen()
 		os.Exit(1)
 	}
+}
+
+func exportKeystone(dbPath, out, host string, limit int) error {
+	if _, err := os.Stat(dbPath); err != nil {
+		// ledger.Open would create an empty database and export nothing, which
+		// reads as "this machine made no connections" rather than "wrong path".
+		return fmt.Errorf("no ledger at %s: %w", dbPath, err)
+	}
+	led, err := ledger.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open ledger: %w", err)
+	}
+	defer led.Close()
+	conns, err := led.RecentConnections(limit)
+	if err != nil {
+		return fmt.Errorf("read ledger: %w", err)
+	}
+	if host == "" {
+		if host, err = os.Hostname(); err != nil || host == "" {
+			return fmt.Errorf("could not read this machine's name; pass -export-host")
+		}
+	}
+	b, err := json.MarshalIndent(keystone.Build(conns, host, build.Label(), time.Now()), "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	if out == "-" {
+		_, err = os.Stdout.Write(b)
+		return err
+	}
+	// Owner-only: the export names every program on the machine and every
+	// place it went, with full paths that include the user's name.
+	if err := os.WriteFile(out, b, 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "export: %d ledger rows -> %s\n", len(conns), out)
+	return nil
 }
 
 func run(replayPath string, serve, open bool, dbPath string, opts collector.Options, seed settings.Values,
