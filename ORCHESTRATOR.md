@@ -9,9 +9,8 @@
 
 - **Rotation slot:** #15
 - **Git remote:** GrimthornRedbeard/nitewatch
-- **Status:** 🔵 **NOT ready for testing (2026-10-25).** Gates 2, 3, 4 pass with evidence; gate 1 holds on one Kevin decision (#8), gate 5 is half-run (Windows-live half needs a VM), gate 6 fails because the fixes below are merged but not yet published.
-- **Published build:** **`v0.1.7-pre`** (`0a0ddbe`, tagged 2026-08-20) at https://threattape.com/products/nitewatch/#build — SHA-256 `1e24add53d9d64a7dae7b9af7b74c5566f19c575a28f50508b9a8bb0e5117af7`, matching the page, built with go1.25.12, and **rebuilt byte-for-byte from the tag on 2026-10-25**. (Earlier status lines saying v0.1.2-pre, and the 2026-08-10 audit saying v0.1.6-pre, were both stale.)
-- **On `main`, not yet published:** go1.26.10 toolchain (clears 16 reachable stdlib vulns), two shipped-bug fixes (story narrative named the wrong program; "Test me" falsely reported beaconing broken), and the Keystone export + Story v1 (#7). Publishing a `v0.1.8-pre` is an Open Decision below.
+- **Status:** 🔵 **NOT ready for testing (2026-10-25).** Gates 2, 3, 4 and 6 pass with evidence. Gates 1 and 5 both wait on the same thing: the Windows test VM (issue #8 is now an LSASS detection that must be built on Windows; the Windows-live half of the smoke test needs Windows).
+- **Published build:** **`v0.1.8-pre`** (`9a93844`, published 2026-10-25 on Kevin's go-ahead) at https://threattape.com/products/nitewatch/#build — SHA-256 `46473cb6e916e134c6352fa4529acaf18f9928f0d404e4eb8115d3a63d4cdd65`, 14.2 MB, go1.26.10. Served file = `.sha256` = page = local build of the tag (built twice, byte-identical). Previous: v0.1.7-pre `1e24add5…` (backups kept on the box as `*.bak-0.1.7-pre`).
 - **Active plan:** none written. The forward plan lives in the shipped roadmap (`agent/internal/help/roadmap.md`) and the Roadmap section below. No `REQUIRES_APPROVAL` gate exists in `docs/`.
 
 ## Roadmap
@@ -20,76 +19,40 @@ _Updated 2026-10-25._
 
 **Done means:** v1 is (1) a published false-positive number from a soak on current code, (2) the Windows-VM smoke test the P1/P2 plans list as owed — live ETW, elevation, a Run-key persistence trigger, a feed-flagged connection, the toast, one response action and its undo, (3) an installer + Windows service with the ledger in %ProgramData% under an ACL (Kevin chose this before the soak, 2026-08-10), and (4) gates 3–4 repeated against the exact published tag, output pasted — **done for v0.1.7-pre on 2026-10-25**.
 
-1. **Publish v0.1.8-pre** — the public binary carries 16 reachable stdlib vulns and two attribution/self-test bugs fixed on `main`. Needs Kevin's go-ahead (Open Decision). _(hours)_
-2. **Windows test VM, then the owed live smoke test** — Hyper-V is staged on Thorn for Checkride (ISO + scripts in `C:\HyperV-setup\`), blocked only on Kevin's elevated shell + reboot. One VM serves both products. _(Kevin's hour, then days)_
-3. **Installer + Windows service + %ProgramData% ledger** — Kevin's 2026-08-10 call: before the soak. Needs the VM. _(weeks)_
-4. **Quiet-machine soak on the service build; publish the number** — replaces "nobody has measured how often it cries wolf" on the download page. _(weeks, mostly elapsed time)_
-5. **Replayable false-positive regression suite** from the soak's recorded trace. _(days, after 4)_
-6. **#8 credential-abuse indicators** — shape depends on the Open Decision below.
+1. **Windows test VM, then the owed live smoke test** — Hyper-V is staged on Thorn for Checkride (ISO + scripts in `C:\HyperV-setup\`), blocked only on Kevin's elevated shell + reboot. One VM serves both products. _(Kevin's hour, then days)_
+2. **Installer + Windows service + %ProgramData% ledger** — Kevin's 2026-08-10 call: before the soak. Needs the VM. _(weeks)_
+3. **Quiet-machine soak on the service build; publish the number** — replaces "nobody has measured how often it cries wolf" on the download page. _(weeks, mostly elapsed time)_
+4. **Replayable false-positive regression suite** from the soak's recorded trace. _(days, after 3)_
+5. **#8 LSASS-access detection** — rescoped by Kevin 2026-10-25: a non-system process opening `lsass.exe` (credential dumping), templated advisory, exported via `-export-keystone`. Build and verify on the VM. _(days, after 1)_
 
 ### Risks
 
-- **The public binary is behind `main` on security** (16 reachable stdlib advisories, go1.25.12) until v0.1.8-pre ships. Reachable surfaces are a loopback-only API server and outbound clients to abuse.ch, RDAP and (user-keyed) VirusTotal — exposure is limited, not nil.
 - The Windows-only code paths — where every attribution bug this project has shipped originated — have still never been exercised on a recorded Windows run.
 - The false-positive rate on the published code is unmeasured; the product's own roadmap says that number decides whether anything else matters.
 - No feedback channel produces data (no telemetry by design; zero outside issues ever filed).
 - GPL-3.0 is inherited from golang-etw; threat-feed licensing for commercial use is unresolved (`docs/feed-licensing.md`).
-- The download page (threattape repo) says "9 MB" for a 14.6 MB file and "a week-long quiet-machine soak is running right now", which nothing verifies. Fix with the next release publish.
+- The published false-positive evidence is one sixteen-day run on one desktop (one wrong alert, fixed in 0.1.7-pre). The download page now says exactly that; it is not a rate.
 
 ### Known doc drift
 
-_Fixed 2026-10-25:_ stale v0.1.2-pre / v0.1.6-pre claims here and in the router; missing release history (now in Rotation History); the stray `=` file; no `## Open Decisions` content. _Still open:_ the download page's size and present-tense soak claims (threattape repo); no GitHub Releases exist for any of the eight tags, so the page's "tagged per release" pointer leads to an empty Releases tab.
+_Fixed 2026-10-25:_ stale v0.1.2-pre / v0.1.6-pre claims here and in the router; missing release history (now in Rotation History); the stray `=` file; no `## Open Decisions` content. Also fixed 2026-10-25 (threattape#186): the download page's present-tense "soak running right now" claim. (An earlier note here said the page showed "9 MB" — wrong; it said 13.9 MB, and a text scrape split the number.) _Still open:_ no GitHub Releases exist for any of the eight tags, so the page's "tagged per release" pointer leads to an empty Releases tab.
 
 ## Gate status
 
-_Assessed 2026-10-25 against v0.1.7-pre (published) and `main` after PR #9. CI is off by portfolio decision; every result is a local run. Evidence in full: `docs/reports/qa-sweep-2026-10-25.md` and the PR #9 body._
+_Assessed 2026-10-25 against v0.1.7-pre, then `main` after PR #9, then the published v0.1.8-pre. CI is off by portfolio decision; every result is a local run. Evidence in full: `docs/reports/qa-sweep-2026-10-25.md` and the PR #9 body._
 
 | Gate | State | Evidence |
 |---|---|---|
-| 1 — zero open issues | ❌ fail (decision-held) | 1 open: **#8** "Observed credential-abuse indicators → Keystone". Not tractable engineering until Kevin picks a direction (Open Decision below); kept open rather than closed as not-planned, because it is undecided, not rejected. #7 shipped in PR #9 and closed. |
-| 2 — zero open PRs | ✅ pass | PR #9 squash-merged; 0 open. |
+| 1 — zero open issues | ❌ fail (VM-held) | 1 open: **#8**, rescoped by Kevin 2026-10-25 to "Detect LSASS access by non-system processes (credential dumping)". Planned work, blocked on the Windows test VM; kept open because it is planned, not abandoned. The multi-host signals moved to GrimthornRedbeard/keystone#20. #7 shipped in PR #9 and closed. |
+| 2 — zero open PRs | ✅ pass | PR #9 and release PR #10 squash-merged; 0 open. |
 | 3 — automated tests pass locally | ✅ pass | `go test -race -count=1 ./...` on go1.26.10 at `370ec11`: **24/24 packages with tests ok, exit 0** (api, autostart, buildinfo, collector, detect, event, explain, filewatch, graph, help, intel, keystone, ledger, legal, notify, rdap, recon, resolve, respond, rules, selftest, settings, source, vt). Also run on the published tag `0a0ddbe` before any change: 23/23 ok. No flakes observed; no flake register needed. |
 | 4 — QA sweep clean | ✅ pass (after fixes) | Published tag: **16 reachable stdlib vulns** (govulncheck, go1.25.12; 5 fixed only in go1.26) and 4 staticcheck findings → fixed by go1.26.10 + `e414672`. Now: `go vet` linux+windows clean, `gofmt -l` empty, `staticcheck` linux+windows clean, `govulncheck` v1.9.0 linux+windows **"No vulnerabilities found"** (DB 2026-10-21), gitleaks over 109 commits clean (one test-fixture false positive recorded in `.gitleaksignore`). The sweep also found two shipped bugs, both fixed with regression tests (see Rotation History). No container, so no trivy. |
 | 5 — smoke test on a local deploy | ⚠️ half-run → not a pass | **Driven (Linux, replay mode):** agent built from the branch, replayed ransomware/malicious/basic traces, dashboard on 127.0.0.1:8973 driven with headless Chromium — terms gate, tiles 1/1/1 = `/api/summary`, grouped row expands, connection story opens with the correct narrative, `/api/story` returns `nitewatch.story/v1` with edges; critical ransomware alert renders with playbook + both action buttons; Quarantine confirm → `/api/actions/run` (Linux stub answers "only available on Windows", as designed); unauthenticated `/api/*` 401, `Host: evil.tld` 403, mutation without header rejected; "Test me" **15/15** with live feeds (3/3 feeds, 7,607 addresses) and 14/15 + 1 correctly skipped with `--no-feeds`, stable over three presses; zero console/page errors. **Not driven, cannot be on this box:** live ETW capture, elevation, toasts, response actions executing/undoing, service install. No Windows VM exists. |
-| 6 — deployed artifact verified | ❌ fail | Served file downloaded 2026-10-25: SHA-256 `1e24add5…5117af7` = page = local rebuild from tag `v0.1.7-pre` (byte-identical); `go version -m`: go1.25.12, `vcs.revision=0a0ddbe`, `vcs.modified=false`. So the artifact is exactly what it claims — **but it does not carry this rotation's fixes** (toolchain CVEs, narrative bug, self-test bug). Clears when v0.1.8-pre is published and its hash re-verified. |
+| 6 — deployed artifact verified | ✅ pass | **v0.1.8-pre published 2026-10-25.** Before: served SHA-256 `1e24add5…5117af7`, go1.25.12, `vcs.revision=0a0ddbe`; `govulncheck -mode binary` on the served file: **21 findings**. After (downloaded with a cache-buster): served SHA-256 `46473cb6…cdd65` = served `.sha256` = page = two local builds of tag `v0.1.8-pre`; `go version -m`: go1.26.10, `vcs.revision=9a93844`, `vcs.modified=false`; page shows `Build 0.1.8-pre (9a93844)`, 14.2 MB; `govulncheck -mode binary` on the served file: **No vulnerabilities found**. |
 
 ## Open Decisions (awaiting Kevin)
 
 _Each entry stands on its own: you should be able to answer it without opening another file or remembering an issue number._
-
-### Publish NiteWatch 0.1.8-pre now, so the public download picks up a security toolchain update and two bug fixes?
-
-- **Status:** open · **Added:** 2026-10-25 · **Reversible:** easily
-- **Blocked:** Gate 6 (the deployed artifact carrying the fixes), and therefore any 🟢. Nothing else waits on it.
-
-**Background.** The file people download from threattape.com/products/nitewatch is 0.1.7-pre from August. On 2026-10-25 it was re-verified: its hash matches the page and it rebuilds byte-for-byte from its source tag, so it is exactly what it says it is. But it was built with Go 1.25.12, and Google's vulnerability scanner finds 16 published Go standard-library vulnerabilities in code paths the agent actually uses — its local-only dashboard server, and the outbound connections it makes to download threat lists, look up address owners, and (if the user supplies a key) ask VirusTotal. Five are fixed only in Go 1.26. Exposure is limited, because the dashboard listens only on the machine itself, but it is not nothing. The same rotation fixed two bugs that are in the public build: (1) the one-paragraph explanation of a connection could name the wrong program — whichever program had most recently looked up that address, rather than the one that connected — and say it "looked up" a name it never looked up; (2) pressing "Test me" a second time reported the beaconing detection as broken on a perfectly working agent. Both are fixed on `main` with tests, along with a new export for Keystone. Every past release was published on your say-so, and publishing means updating the download page in the threattape site repo (new file, new hash, version line), which is a different project.
-
-**Options**
-
-| Option | Pros | Cons | Effort |
-|---|---|---|---|
-| Publish 0.1.8-pre now | Public build gets the security fixes and stops misnaming programs; fix the page's stale "9 MB" and "soak running right now" lines in the same edit | One more unsigned pre-release; anyone who already verified 0.1.7's hash has a new one to check | hours (tag, build from the main checkout, update page + hash, re-verify the served file) |
-| Hold until the installer/service build | One release instead of two | The public file stays on a toolchain with 16 known vulnerabilities for the weeks the installer takes | none now |
-| Also publish GitHub Releases for every tag | The page's "tagged per release" pointer finally leads somewhere; independent copy of each hash | Public repo clutter; separate from the security question | hours, on top of either option |
-
-**Recommendation.** Publish 0.1.8-pre now, and correct the two stale download-page lines in the same edit. The security fixes are the reason; the two attribution/self-test bugs are the product's credibility, which is its whole pitch. GitHub Releases are worth doing but are not urgent.
-
-### Issue #8 asks NiteWatch to observe credential abuse (NTLM on the wire, LSASS access, pass-the-hash, lateral logons) and feed it to Keystone. Is that NiteWatch's job?
-
-- **Status:** open · **Added:** 2026-10-25 · **Reversible:** easily (nothing built yet)
-- **Blocked:** Gate 1 for NiteWatch (it is the only open issue), and the "observed" half of Keystone's credential-theft paths, which today run on a fake feed.
-
-**Background.** You filed #8 on 2026-09-19 from Keystone's architecture. Keystone (the correlation tier) already has a reader waiting for this data: a feed of `reuse_events`, each saying "this credential was reused from host A against host B". Four kinds of evidence are asked for. They split cleanly by what one consumer PC can actually see. **LSASS access** — a program opening the Windows process that holds logged-in users' credentials, the classic credential-dumping step — is visible on a single machine through a userland Windows event source (no kernel driver, so it fits NiteWatch's rules), and would be a genuinely useful consumer detection in its own right. **NTLM authentication** is also visible locally, but on a home PC with no domain it is mostly noise. **Hash/token reuse across hosts** and **lateral logons** are by definition about several machines in one organisation: a single home PC cannot see them, and they presume a Windows domain that consumers do not have. Separately, NiteWatch's hard rule is that nothing leaves the machine on its own, while Keystone expects to fetch a feed. Checkride, which shares NiteWatch's engine, is the enterprise Windows product, but its scope is hardening, not detection.
-
-**Options**
-
-| Option | Pros | Cons | Effort |
-|---|---|---|---|
-| A. Narrow #8 to LSASS access as a NiteWatch detection; move cross-host reuse and lateral auth to an enterprise sensor (new issue, not NiteWatch) | Ships the part a consumer benefits from; keeps NiteWatch a consumer product; Keystone gets real single-host evidence via the file export | Keystone's `reuse_events` feed still has no real producer | days to build; needs the Windows VM to verify (event field names vary by Windows build — this project's attribution bugs all lived there) |
-| B. Make NiteWatch an enterprise sensor too (domain-aware mode, LAN feed to Keystone) | One agent covers both markets | Changes the product's privacy posture and audience; large; a second product hiding inside the consumer one | weeks |
-| C. Close #8 as not planned for NiteWatch; leave it to a future enterprise sensor | Clean scope | Loses the LSASS detection, which consumers would benefit from | none |
-
-**Recommendation.** A. LSASS access is the one indicator that is both visible on a single PC and valuable to the person running it; the cross-host indicators belong to whatever enterprise sensor Keystone eventually gets, not to a consumer EDR-lite. Build it after the Windows VM exists, not before — shipping an untested Windows sensor is how the last two attribution bugs reached real machines.
 
 ### How should Keystone receive NiteWatch data, and should Keystone adopt NiteWatch's "Story" format as its own explanation format?
 
@@ -111,6 +74,24 @@ _Each entry stands on its own: you should be able to answer it without opening a
 ## Decisions Resolved
 
 _Answered decisions, newest first. Kept rather than deleted: the record of what was decided and why is the point._
+
+### Publish NiteWatch 0.1.8-pre now, so the public download picks up a security toolchain update and two bug fixes?
+
+- **Resolved 2026-10-25** by Kevin
+- **Decision:** Publish now (no GitHub Releases this time).
+- **Why:** Kevin chose the recommended option. Done the same day: v0.1.8-pre tagged at `9a93844`, built from the clean main checkout, published with threattape#186; served file, page and `.sha256` all read `46473cb6…cdd65`; the binary-mode vulnerability scan of the served file went from 21 findings to none. The page's stale "soak running right now" line was corrected in the same edit. GitHub Releases for the tags remain undone.
+
+**Background.** The file people download from threattape.com/products/nitewatch is 0.1.7-pre from August. On 2026-10-25 it was re-verified: its hash matches the page and it rebuilds byte-for-byte from its source tag, so it is exactly what it says it is. But it was built with Go 1.25.12, and Google's vulnerability scanner finds 16 published Go standard-library vulnerabilities in code paths the agent actually uses — its local-only dashboard server, and the outbound connections it makes to download threat lists, look up address owners, and (if the user supplies a key) ask VirusTotal. Five are fixed only in Go 1.26. Exposure is limited, because the dashboard listens only on the machine itself, but it is not nothing. The same rotation fixed two bugs that are in the public build: (1) the one-paragraph explanation of a connection could name the wrong program — whichever program had most recently looked up that address, rather than the one that connected — and say it "looked up" a name it never looked up; (2) pressing "Test me" a second time reported the beaconing detection as broken on a perfectly working agent. Both are fixed on `main` with tests, along with a new export for Keystone. Every past release was published on your say-so, and publishing means updating the download page in the threattape site repo (new file, new hash, version line), which is a different project.
+
+
+### Issue #8 asks NiteWatch to observe credential abuse (NTLM on the wire, LSASS access, pass-the-hash, lateral logons) and feed it to Keystone. Is that NiteWatch's job?
+
+- **Resolved 2026-10-25** by Kevin
+- **Decision:** Narrow #8 to an LSASS-access detection in NiteWatch, built and verified on the Windows VM; move the multi-host signals out.
+- **Why:** Kevin chose the recommended option. #8 was retitled and rewritten the same day ("Detect LSASS access by non-system processes (credential dumping) → Keystone"), original text kept at the bottom; reuse across hosts, lateral auth and enterprise NTLM went to GrimthornRedbeard/keystone#20 for a future business-network sensor. #8 now waits only on the Windows VM.
+
+**Background.** You filed #8 on 2026-09-19 from Keystone's architecture. Keystone (the correlation tier) already has a reader waiting for this data: a feed of `reuse_events`, each saying "this credential was reused from host A against host B". Four kinds of evidence are asked for. They split cleanly by what one consumer PC can actually see. **LSASS access** — a program opening the Windows process that holds logged-in users' credentials, the classic credential-dumping step — is visible on a single machine through a userland Windows event source (no kernel driver, so it fits NiteWatch's rules), and would be a genuinely useful consumer detection in its own right. **NTLM authentication** is also visible locally, but on a home PC with no domain it is mostly noise. **Hash/token reuse across hosts** and **lateral logons** are by definition about several machines in one organisation: a single home PC cannot see them, and they presume a Windows domain that consumers do not have. Separately, NiteWatch's hard rule is that nothing leaves the machine on its own, while Keystone expects to fetch a feed. Checkride, which shares NiteWatch's engine, is the enterprise Windows product, but its scope is hardening, not detection.
+
 
 ### Which comes first — the false-positive measurement, or the installer and Windows service that would make measuring it practical?
 
@@ -142,6 +123,8 @@ _Answered decisions, newest first. Kept rather than deleted: the record of what 
 
 _Newest first. Entries that covered several projects at once also appear in the other
 projects' files and in `_archive/orchestrator-history/portfolio-sessions.md`._
+
+> 🔵 **2026-10-25, later (nitewatch — v0.1.8-pre published; #8 rescoped).** Kevin, present in the session, answered two of the three open decisions: **publish now** and **narrow #8 to LSASS**. Release: version bump PR #10 → tag `v0.1.8-pre` at `9a93844` → built in the **main checkout** (a worktree build stamps the wrong revision) twice, byte-identical `46473cb6…cdd65`, 14,866,432 bytes. threattape#186 updated the exe, `.sha256`, page (hash, build line, 14.2 MB, version) and walkthrough, and replaced "a week-long soak is running right now" with what was measured — one 16-day run on one desktop, one wrong alert, fixed in 0.1.7-pre. Deployed **surgically** (the four files only, live copies backed up as `*.bak-*`) after confirming the live files matched repo HEAD byte-for-byte. **Gate 6 ✅:** served file re-downloaded with a cache-buster, every hash agrees, `govulncheck -mode binary` on it: 21 findings → none. #8 retitled/rewritten for LSASS access; multi-host signals filed as GrimthornRedbeard/keystone#20. **Noticed, not touched:** zero-byte `.git/index.lock` files in several other projects' main checkouts (a 10-17 batch, threattape 10-20, plus two recent ones that may be live); the one removed from this checkout earlier today was most likely from the 10-17 batch, not "yesterday" as first reported.
 
 > 🔵 **2026-10-25 (nitewatch — rotation: gates re-run against the real published build; #7 shipped; two shipped bugs and 16 stdlib vulns fixed; not 🟢).** **The live build was v0.1.7-pre, not what any status doc said** — v0.1.2-pre here, v0.1.6-pre in the 2026-08-10 audit. Downloaded, hashed (`1e24add5…`, matches the page) and **rebuilt byte-for-byte from the tag**. **Release history the docs never recorded:** v0.1.3-pre `56711ed` (GPL-3.0 relicense + copyright), v0.1.4-pre `d6179a6` (soak retune — three false-positive classes, no threshold changes), v0.1.5-pre `0bf7920` (stat tiles counted the page, not the ledger; `/api/summary`), v0.1.6-pre `d1020c3` (favicon), v0.1.7-pre `0a0ddbe` (an SSH key read *and used* reported quietly instead of as infostealer behaviour). **Gate 4 on the published tag failed:** govulncheck found 16 *reachable* stdlib vulns (go1.25.12; five fixed only in go1.26) → toolchain go1.26.10 (`govulncheck` itself had to be rebuilt with go1.26 to load packages). staticcheck's 4 findings fixed. **#7 shipped (PR #9):** Story now carries `schema: nitewatch.story/v1`, the poset's real **edges**, and per-step pid/image; `-export-keystone FILE` writes `flows`/`events`/`stories` in the exact shapes Keystone's `parse_nitewatch_egress`/`parse_nitewatch_causal` read; `scripts/keystone-contract.py` runs **Keystone's own parser** (copied to a temp package — the Keystone checkout untouched) and has a negative control. **Two shipped bugs found on the way, both the attribution family this project keeps meeting:** (1) the story's headline sentence named *whichever program last resolved the address* — routine on shared CDN addresses, since the graph keeps the most recent resolution by any process and live network events carry no image — and credited it with a lookup it never made; also the stored Mermaid and the dashboard both presented Lamport order as "each step caused the next"; (2) **"Test me" reported beaconing broken on every press after the first** — the beacon tracker's per-flow alert latch, reused by the drill; found only by pressing the button three times during the smoke test. **Gotchas recorded:** a Go binary built inside a `git worktree` stamps the *enclosing* repo's revision (Go only recognises a `.git` directory) — build releases from the main checkout, now in the README; the shared Playwright MCP browser was held by another session, so the dashboard was driven with standalone playwright-core; the tip modal pauses table redraws on first launch, which looks like an empty ledger. **#8 not built:** most of it is cross-host enterprise sensing that a single consumer PC cannot observe — recorded as a decision with a recommended narrowing to LSASS access. **No release cut** (always Kevin-authorised; publishing edits the threattape repo) → Gate 6 fails until v0.1.8-pre ships. Gate 5's Windows-live half still needs the Hyper-V VM staged for Checkride.
 
