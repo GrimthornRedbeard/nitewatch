@@ -30,6 +30,11 @@ type Alert struct {
 	ConnID   int64
 	Evidence map[string]any
 	Status   string // new | acknowledged
+	// Sealed reports whether this row carries a valid seal from this agent's
+	// key (see SetSealer). Only a sealed alert may drive a remediation. Rows
+	// written before sealing existed, by another install, or by anything other
+	// than the agent are shown but never acted on.
+	Sealed bool
 }
 
 const alertSchema = `
@@ -44,7 +49,8 @@ CREATE TABLE IF NOT EXISTS alerts (
 	playbook  TEXT NOT NULL DEFAULT '[]',
 	conn_id   INTEGER NOT NULL DEFAULT 0,
 	evidence  TEXT NOT NULL DEFAULT '{}',
-	status    TEXT NOT NULL DEFAULT 'new'
+	status    TEXT NOT NULL DEFAULT 'new',
+	mac       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
 -- One alert per rule per connection: a rule that matches on every packet of a
@@ -70,7 +76,8 @@ CREATE TABLE IF NOT EXISTS actions (
 	ok       INTEGER NOT NULL DEFAULT 0,
 	message  TEXT NOT NULL DEFAULT '',
 	undo     TEXT NOT NULL DEFAULT '{}',
-	undone   INTEGER NOT NULL DEFAULT 0
+	undone   INTEGER NOT NULL DEFAULT 0,
+	mac      TEXT NOT NULL DEFAULT ''
 );`
 
 // ActionRecord is one remediation the user chose, and what it did.
@@ -89,16 +96,20 @@ type ActionRecord struct {
 	Message string
 	Undo    map[string]string
 	Undone  bool
+	// Sealed reports whether kind, params and undo carry a valid seal from this
+	// agent's key. Only a sealed record may be undone.
+	Sealed bool
 }
 
 // RecordAction appends to the action audit log and returns its id.
 func (d *DB) RecordAction(a ActionRecord) (int64, error) {
 	params, _ := json.Marshal(a.Params)
 	undo, _ := json.Marshal(a.Undo)
+	mac := d.actionSeal(a.Kind, string(params), string(undo))
 	res, err := d.sql.Exec(
-		`INSERT INTO actions (ts, alert_id, kind, label, params, ok, message, undo, undone)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-		formatTS(a.Time), a.AlertID, a.Kind, a.Label, string(params), a.OK, a.Message, string(undo))
+		`INSERT INTO actions (ts, alert_id, kind, label, params, ok, message, undo, undone, mac)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+		formatTS(a.Time), a.AlertID, a.Kind, a.Label, string(params), a.OK, a.Message, string(undo), mac)
 	if err != nil {
 		return 0, err
 	}
@@ -108,7 +119,7 @@ func (d *DB) RecordAction(a ActionRecord) (int64, error) {
 // RecentActions returns the audit log, newest first.
 func (d *DB) RecentActions(limit int) ([]ActionRecord, error) {
 	rows, err := d.sql.Query(
-		`SELECT id, ts, alert_id, kind, label, params, ok, message, undo, undone
+		`SELECT id, ts, alert_id, kind, label, params, ok, message, undo, undone, mac
 		 FROM actions ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -117,12 +128,13 @@ func (d *DB) RecentActions(limit int) ([]ActionRecord, error) {
 	var out []ActionRecord
 	for rows.Next() {
 		var a ActionRecord
-		var ts, params, undo string
+		var ts, params, undo, mac string
 		if err := rows.Scan(&a.ID, &ts, &a.AlertID, &a.Kind, &a.Label,
-			&params, &a.OK, &a.Message, &undo, &a.Undone); err != nil {
+			&params, &a.OK, &a.Message, &undo, &a.Undone, &mac); err != nil {
 			return nil, err
 		}
 		a.Time = parseTS(ts)
+		a.Sealed = d.sealer != nil && d.sealer.Verify(mac, sealActionDomain, a.Kind, params, undo)
 		_ = json.Unmarshal([]byte(params), &a.Params)
 		_ = json.Unmarshal([]byte(undo), &a.Undo)
 		out = append(out, a)
@@ -195,12 +207,13 @@ func (d *DB) AlertByID(id int64) (Alert, error) {
 func (d *DB) RecordAlert(a Alert) (bool, error) {
 	playbook, _ := json.Marshal(a.Playbook)
 	evidence, _ := json.Marshal(a.Evidence)
+	mac := d.alertSeal(a.RuleID, a.Area, a.Severity, string(evidence))
 	res, err := d.sql.Exec(
 		`INSERT OR IGNORE INTO alerts
-		   (ts, rule_id, area, severity, title, narrative, playbook, conn_id, evidence, status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')`,
+		   (ts, rule_id, area, severity, title, narrative, playbook, conn_id, evidence, status, mac)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)`,
 		formatTS(a.Time), a.RuleID, a.Area, a.Severity, a.Title, a.Narrative,
-		string(playbook), a.ConnID, string(evidence),
+		string(playbook), a.ConnID, string(evidence), mac,
 	)
 	if err != nil {
 		return false, err
@@ -212,7 +225,7 @@ func (d *DB) RecordAlert(a Alert) (bool, error) {
 // RecentAlerts returns up to limit alerts, newest first.
 func (d *DB) RecentAlerts(limit int) ([]Alert, error) {
 	rows, err := d.sql.Query(
-		`SELECT id, ts, rule_id, area, severity, title, narrative, playbook, conn_id, evidence, status
+		`SELECT id, ts, rule_id, area, severity, title, narrative, playbook, conn_id, evidence, status, mac
 		 FROM alerts ORDER BY ts DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -222,12 +235,13 @@ func (d *DB) RecentAlerts(limit int) ([]Alert, error) {
 	var out []Alert
 	for rows.Next() {
 		var a Alert
-		var ts, playbook, evidence string
+		var ts, playbook, evidence, mac string
 		if err := rows.Scan(&a.ID, &ts, &a.RuleID, &a.Area, &a.Severity, &a.Title,
-			&a.Narrative, &playbook, &a.ConnID, &evidence, &a.Status); err != nil {
+			&a.Narrative, &playbook, &a.ConnID, &evidence, &a.Status, &mac); err != nil {
 			return nil, err
 		}
 		a.Time = parseTS(ts)
+		a.Sealed = d.sealer != nil && d.sealer.Verify(mac, sealAlertDomain, a.RuleID, a.Area, a.Severity, evidence)
 		_ = json.Unmarshal([]byte(playbook), &a.Playbook)
 		_ = json.Unmarshal([]byte(evidence), &a.Evidence)
 		out = append(out, a)
@@ -265,4 +279,42 @@ func (d *DB) DeleteDrillAlerts() (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// Sealer authenticates rows the agent writes. *seal.Key satisfies it; the
+// interface keeps this package free of key handling.
+type Sealer interface {
+	Sum(fields ...string) string
+	Verify(mac string, fields ...string) bool
+}
+
+// Domain separators, so an action's seal can never be presented as an alert's.
+const (
+	sealAlertDomain  = "nitewatch.alert.v1"
+	sealActionDomain = "nitewatch.action.v1"
+)
+
+// SetSealer turns on sealing. Call it once, before the collector or the API
+// start using the database. Without a sealer every row reads back unsealed, so
+// nothing can be acted on — closed, not open.
+//
+// What is sealed is exactly what a remediation is derived from: for an alert,
+// the rule, area, severity and evidence (respond.Suggest reads area, severity
+// and evidence); for an action, its kind, params and undo record. Fields such
+// as status, acknowledged and undone are deliberately outside the seal: the
+// worst a forger can do with them is hide or re-show history.
+func (d *DB) SetSealer(s Sealer) { d.sealer = s }
+
+func (d *DB) alertSeal(ruleID, area, severity, evidence string) string {
+	if d.sealer == nil {
+		return ""
+	}
+	return d.sealer.Sum(sealAlertDomain, ruleID, area, severity, evidence)
+}
+
+func (d *DB) actionSeal(kind, params, undo string) string {
+	if d.sealer == nil {
+		return ""
+	}
+	return d.sealer.Sum(sealActionDomain, kind, params, undo)
 }

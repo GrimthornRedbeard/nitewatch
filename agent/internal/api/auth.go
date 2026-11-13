@@ -7,10 +7,10 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Token authenticates callers to the local API.
@@ -19,53 +19,64 @@ import (
 // security boundary is worse than not having one.
 //
 // The API listens on loopback HTTP, and any process on the machine can open a
-// loopback socket. HTTP has no way to identify the process at the other end, so
-// this token cannot be a boundary against a local attacker who can read the
-// token file: they are running as the same user, and at that point they can
-// read the ledger database directly anyway.
+// loopback socket. HTTP cannot identify the process at the other end, so the
+// token is the whole check. How a caller can learn it:
 //
-// What it DOES stop:
-//   - Any other user account on a shared machine.
-//   - Scripts and malware that probe fixed local ports opportunistically, which
-//     is the realistic threat: a stealer that knows nothing about NiteWatch
-//     cannot silence its detections or enumerate the user's traffic.
-//   - A rebound web page that got past the Host check, since it cannot read a
-//     local file to learn the token.
+//   - The dashboard shell served at "/" does NOT contain it. (It used to,
+//     which made it free to anyone who asked.)
+//   - The agent opens the dashboard at http://127.0.0.1:8973/#t=<token> and
+//     prints that link to its console. The fragment is never sent to a
+//     server; the page moves it into sessionStorage and removes it from the
+//     address bar.
+//   - It is written to the api-token file for scripting, with an ACL that
+//     admits only SYSTEM and Administrators on Windows (read it from an
+//     elevated prompt). A new token is made on every start.
+//
+// What it therefore stops:
+//   - Scripts and malware that probe fixed local ports: a request to "/" no
+//     longer yields anything that unlocks /api.
+//   - A rebound web page that got past the Host check.
+//   - Other user accounts on a shared machine, which can neither read the file
+//     nor see the browser that holds the token.
+//
+// What it does NOT stop: a program already running as the signed-in user. It
+// can read the browser's memory, its session storage or its command line, all
+// of which are that user's own. Such a program can also read the ledger file
+// directly. Remediation stays safe against it for a different reason: the
+// elevated agent only acts on records it sealed itself (package seal).
 //
 // A proper boundary needs an OS-level transport that carries caller identity —
-// a named pipe with an ACL on Windows. That is the right long-term answer and
-// is recorded as future work; this is the meaningful improvement available
-// without changing the transport.
+// a named pipe with an ACL on Windows. That is recorded as future work.
 type Token struct {
 	value string
 	path  string
 }
 
-// NewToken loads the token from disk or creates one, storing it owner-readable.
+// NewToken makes a fresh token for this run and stores it in dir/api-token,
+// readable only by SYSTEM and Administrators on Windows (owner-only elsewhere).
+//
+// A token is never read back from disk. The folder is often user-writable, so
+// a token file found there may have been planted by someone who knows its
+// value. Failing to write the file is not fatal: the token still works, it
+// just cannot be read from disk by scripts this run.
 func NewToken(dir string) (*Token, error) {
-	path := filepath.Join(dir, "api-token")
-
-	if b, err := os.ReadFile(path); err == nil {
-		if v := strings.TrimSpace(string(b)); len(v) >= 32 {
-			return &Token{value: v, path: path}, nil
-		}
-	}
-
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, err
 	}
-	v := hex.EncodeToString(raw)
+	t := &Token{value: hex.EncodeToString(raw)}
 
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
+	path := filepath.Join(dir, "api-token")
+	// Remove whatever is there first, then create exclusively. If a link was
+	// planted at this name, Remove deletes the link itself and the exclusive
+	// create refuses anything recreated in between, so an elevated write
+	// cannot be redirected onto another file.
+	_ = os.Remove(path)
+	if err := writePrivateFile(path, []byte(t.value)); err != nil {
+		return t, fmt.Errorf("token not written to %s: %w", path, err)
 	}
-	// 0600: on Windows this maps to an ACL granting only the owner, which is
-	// what keeps the token out of reach of other user accounts.
-	if err := os.WriteFile(path, []byte(v), 0o600); err != nil {
-		return nil, err
-	}
-	return &Token{value: v, path: path}, nil
+	t.path = path
+	return t, nil
 }
 
 // Value is the token string.
@@ -77,7 +88,8 @@ func (t *Token) Value() string {
 }
 
 // Path is where the token is stored, for the log line that tells a user where
-// to find it if they want to script against the API.
+// to find it if they want to script against the API. Empty when the file could
+// not be written.
 func (t *Token) Path() string {
 	if t == nil {
 		return ""
@@ -95,8 +107,8 @@ func (t *Token) matches(got string) bool {
 }
 
 // requireToken rejects API requests without a valid token. The dashboard shell
-// itself is exempt: it carries no data and must load in order to present the
-// token to the page's own scripts.
+// itself is exempt: it carries no data and no credential, and must load so its
+// scripts can pick the token up from the URL fragment.
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.token == nil || s.token.Value() == "" {

@@ -13,8 +13,9 @@ processes, quarantine files and write firewall rules. The interesting failures
 are the ones where that power ends up in the wrong hands:
 
 - **Anything that reaches the local API without the token.** It binds 127.0.0.1,
-  validates the `Host` header against DNS rebinding, and requires a token stored
-  owner-readable on disk. A way around any of that is the report I most want.
+  validates the `Host` header against DNS rebinding, and requires a token that
+  is not served to unauthenticated callers. A way around any of that is the
+  report I most want.
 - **A page on the internet causing NiteWatch to act.** Remediation endpoints are
   POST-only and guarded for exactly this reason. A cross-site request that stops
   a process or writes a rule is a serious bug.

@@ -69,7 +69,8 @@ type Connection struct {
 
 // DB wraps the SQLite handle.
 type DB struct {
-	sql *sql.DB
+	sql    *sql.DB
+	sealer Sealer
 }
 
 // Open opens (creating if needed) the ledger database at path and applies the
@@ -117,6 +118,14 @@ func Open(path string) (*DB, error) {
 	if _, err := h.Exec(alertSchema); err != nil {
 		h.Close()
 		return nil, err
+	}
+	// Ledgers created before records were sealed lack the mac columns. Their
+	// existing rows get an empty mac, which never verifies.
+	for _, t := range []string{"alerts", "actions"} {
+		if err := addColumnIfMissing(h, t, "mac", `TEXT NOT NULL DEFAULT ''`); err != nil {
+			h.Close()
+			return nil, err
+		}
 	}
 	return &DB{sql: h}, nil
 }
@@ -451,4 +460,29 @@ func (d *DB) Summarise() (Summary, error) {
 	// A missing alerts table is not worth failing the whole summary over.
 	_ = d.sql.QueryRow(`SELECT COUNT(*) FROM alerts`).Scan(&s.Alerts)
 	return s, nil
+}
+
+// addColumnIfMissing adds a column to an existing table. SQLite has no
+// ADD COLUMN IF NOT EXISTS, so the table's columns are read first.
+func addColumnIfMissing(h *sql.DB, table, column, decl string) error {
+	rows, err := h.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	_, err = h.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }

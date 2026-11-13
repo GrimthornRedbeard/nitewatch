@@ -596,6 +596,7 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   </div>
 </header>
 <div class="wrap">
+  <div id="auth-banner" class="banner"></div>
   <div id="banner" class="banner"></div>
 
   <div id="columns" class="panel">
@@ -905,14 +906,37 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   });
   const $ = (id) => document.getElementById(id);
 
-  // Mutating endpoints require this header; it is what stops another site's
-  // page from telling this agent to kill a process.
-  // The agent substitutes the real token when serving this page, so it never
-  // travels in a URL where it would reach browser history or a Referer header.
-  const TOKEN = "__NITEWATCH_TOKEN__";
+  // The API token. This page is served WITHOUT it — anything on the machine
+  // can fetch "/", so a token in the page would be a token for anyone. NiteWatch
+  // opens the dashboard at ".../#t=<token>" instead: a URL fragment is never
+  // sent to a server or in a Referer header. Keep it for this tab in
+  // sessionStorage (so a reload works) and take it out of the address bar.
+  const TOKEN_KEY = "nitewatch-token";
+  const TOKEN = (() => {
+    const m = /(?:^#|&)t=([0-9a-fA-F]{32,128})(?:&|$)/.exec(location.hash);
+    if (m) {
+      try { sessionStorage.setItem(TOKEN_KEY, m[1]); } catch (e) { /* storage blocked */ }
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ }
+      return m[1];
+    }
+    try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  })();
+  // Mutating endpoints also require the X-NiteWatch header; it is what stops
+  // another site's page from telling this agent to kill a process.
   const NW = {"X-NiteWatch": "1", "X-NiteWatch-Token": TOKEN};
-  const post = (url) => fetch(url, {method: "POST", headers: NW});
-  const get = (url) => fetch(url, {headers: {"X-NiteWatch-Token": TOKEN}});
+  function needsLaunchLink() {
+    const b = document.getElementById("auth-banner");
+    if (!b || b.classList.contains("show")) return;
+    b.className = "banner show";
+    b.innerHTML = "<b>Open the dashboard from NiteWatch.</b> This page needs the link NiteWatch " +
+      "opens for you, which is also printed in the NiteWatch window (it ends in <b>#t=</b> and a long code). " +
+      "A bookmark of the plain address will not work, and a link from before NiteWatch was last " +
+      "restarted stops working when it restarts.";
+  }
+  if (!TOKEN) needsLaunchLink();
+  const authed = (p) => p.then((r) => { if (r.status === 401) needsLaunchLink(); return r; });
+  const post = (url) => authed(fetch(url, {method: "POST", headers: NW}));
+  const get = (url) => authed(fetch(url, {headers: {"X-NiteWatch-Token": TOKEN}}));
 
   // Every error response from the API is plain text, not JSON. Calling .json()
   // on one throws "Unexpected token ... is not valid JSON", which is what the
@@ -2740,6 +2764,16 @@ tr.grouphead.open .tw { transform: rotate(90deg); }
   async function loadActions(a) {
     try {
       const r = await getJSON("/api/actions?alert=" + encodeURIComponent(a.id));
+      if (r.unverified && r.note) {
+        const m = $("msg-" + a.id);
+        if (m && !m.dataset.noted) {
+          m.dataset.noted = "1";
+          m.hidden = false;
+          m.className = "actmsg";
+          m.textContent = r.note;
+        }
+        return;
+      }
       if (!r.available || !(r.actions || []).length) return;
       const box = $("acts-" + a.id);
       if (!box || box.dataset.loaded) return;

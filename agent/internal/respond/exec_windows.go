@@ -6,13 +6,17 @@
 package respond
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -110,6 +114,9 @@ func (w *WindowsExecutor) quarantine(a Action) Result {
 	if path == "" {
 		return Result{Message: "no file path"}
 	}
+	if InWindowsDir(path) {
+		return Result{Message: "NiteWatch does not quarantine files inside the Windows folder"}
+	}
 	if _, err := os.Stat(path); err != nil {
 		return Result{Message: "that file is no longer there"}
 	}
@@ -132,29 +139,146 @@ func (w *WindowsExecutor) quarantine(a Action) Result {
 	// Deny execution even from the quarantine folder.
 	_ = exec.Command(system32("icacls.exe"), dest, "/deny", "*S-1-1-0:(X)").Run()
 
+	// The quarantine folder is user-writable, so the file could be swapped
+	// before an undo. Record what was quarantined; restore checks it.
+	sum, err := hashFile(dest)
+	if err != nil {
+		return Result{OK: true, Message: fmt.Sprintf("Moved the program to quarantine (it cannot be restored automatically: %v). Original location: %s", err, path)}
+	}
 	return Result{
 		OK:      true,
 		Message: fmt.Sprintf("Moved the program to quarantine. Original location: %s", path),
-		Undo:    map[string]string{"from": dest, "to": path},
+		Undo:    map[string]string{"from": dest, "to": path, "sha256": sum},
 	}
 }
 
 func (w *WindowsExecutor) restore(undo map[string]string) Result {
-	from, to := undo["from"], undo["to"]
-	if from == "" || to == "" {
-		return Result{Message: "no quarantine record"}
+	if err := restoreFile(undo["from"], undo["to"], undo["sha256"]); err != nil {
+		return Result{Message: fmt.Sprintf("could not restore the file: %v", err)}
 	}
-	_ = exec.Command(system32("icacls.exe"), from, "/remove:d", "*S-1-1-0").Run()
-	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-		return Result{Message: "could not recreate the original folder"}
+	return Result{OK: true, Message: fmt.Sprintf("Restored the program to %s.", undo["to"])}
+}
+
+// restoreFile puts a quarantined file back, elevated, without trusting the
+// user-writable quarantine folder or the path on the way to the destination.
+//
+//  1. The quarantined file is opened with no write or delete sharing, so it
+//     cannot be swapped while it is read, and its SHA-256 must equal the one
+//     recorded (and sealed) when it was quarantined.
+//  2. The destination folder is opened, again without delete sharing, and its
+//     real path must equal the recorded one and lie outside the Windows folder.
+//     That refuses a junction or symlink planted anywhere on the way, and
+//     holding the handle keeps the folder from being swapped afterwards.
+//  3. The bytes already verified are written to a NEW file: an existing file at
+//     the destination is never overwritten.
+//
+// The restored file inherits the destination folder's permissions; it does not
+// carry its original ACL or alternate data streams (including the
+// downloaded-from-the-internet mark).
+func restoreFile(from, to, wantSHA string) error {
+	if from == "" || to == "" || wantSHA == "" {
+		return fmt.Errorf("incomplete quarantine record")
 	}
-	if err := os.Rename(from, to); err != nil {
-		if err := copyFile(from, to); err != nil {
-			return Result{Message: fmt.Sprintf("could not restore the file: %v", err)}
+	src, err := openNoShareWrite(from, windows.GENERIC_READ)
+	if err != nil {
+		return fmt.Errorf("the quarantined file is missing or in use")
+	}
+	f := os.NewFile(uintptr(src), from)
+	data, err := io.ReadAll(f)
+	f.Close()
+	if err != nil {
+		return err
+	}
+	got := sha256.Sum256(data)
+	if hex.EncodeToString(got[:]) != strings.ToLower(wantSHA) {
+		return fmt.Errorf("the quarantined file has changed since it was quarantined, so it will not be restored")
+	}
+
+	parent := filepath.Dir(to)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("could not recreate the original folder")
+	}
+	d, err := openRealDir(parent)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(d)
+
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("something is already at %s; move it aside first", to)
 		}
-		_ = os.Remove(from)
+		return err
 	}
-	return Result{OK: true, Message: fmt.Sprintf("Restored the program to %s.", to)}
+	if _, err := out.Write(data); err != nil {
+		out.Close()
+		_ = os.Remove(to)
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(from)
+	return nil
+}
+
+// openRealDir opens dir without delete sharing and checks that its final path,
+// after every junction and symlink is resolved, is the path we were given and
+// is not inside the Windows folder. The caller must close the handle, and
+// should hold it for as long as it relies on the check.
+func openRealDir(dir string) (windows.Handle, error) {
+	// GENERIC_READ, not just FILE_READ_ATTRIBUTES: an open requesting only
+	// attribute access is exempt from share-mode checks, so it would not stop
+	// anyone renaming the folder while we rely on it.
+	h, err := openNoShareWrite(dir, windows.GENERIC_READ)
+	if err != nil {
+		return 0, fmt.Errorf("could not open %s", dir)
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), 0)
+	if err != nil || int(n) >= len(buf) {
+		windows.CloseHandle(h)
+		return 0, fmt.Errorf("could not resolve %s", dir)
+	}
+	final := strings.TrimPrefix(windows.UTF16ToString(buf[:n]), `\\?\`)
+	if !samePath(final, dir) {
+		windows.CloseHandle(h)
+		return 0, fmt.Errorf("%s is a link to somewhere else; refusing to act through it", dir)
+	}
+	if InWindowsDir(final) {
+		windows.CloseHandle(h)
+		return 0, fmt.Errorf("refusing to act inside the Windows folder")
+	}
+	return h, nil
+}
+
+// openNoShareWrite opens a file or directory allowing others to read it but
+// not to write, rename or delete it while the handle is open.
+func openNoShareWrite(path string, access uint32) (windows.Handle, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, err
+	}
+	// No FILE_FLAG_OPEN_REPARSE_POINT: links must be FOLLOWED here, so that
+	// openRealDir sees where a junctioned folder really leads. Opening the link
+	// itself would report the link's own path and pass the check.
+	// BACKUP_SEMANTICS is what allows a directory to be opened at all.
+	return windows.CreateFile(p, access, windows.FILE_SHARE_READ, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // removeAutostart deletes the registry value or startup file, recording what it
@@ -175,8 +299,12 @@ func (w *WindowsExecutor) removeAutostart(a Action) Result {
 		if err := os.Rename(src, dest); err != nil {
 			return Result{Message: fmt.Sprintf("could not remove the startup item: %v", err)}
 		}
+		sum, err := hashFile(dest)
+		if err != nil {
+			return Result{OK: true, Message: "Removed it from your Startup folder (it cannot be restored automatically)."}
+		}
 		return Result{OK: true, Message: "Removed it from your Startup folder.",
-			Undo: map[string]string{"kind": "file", "from": dest, "to": src}}
+			Undo: map[string]string{"kind": "file", "from": dest, "to": src, "sha256": sum}}
 	}
 
 	root, sub, err := splitRegistryPath(loc)
@@ -206,7 +334,7 @@ func (w *WindowsExecutor) removeAutostart(a Action) Result {
 func (w *WindowsExecutor) restoreAutostart(undo map[string]string) Result {
 	switch undo["kind"] {
 	case "file":
-		if err := os.Rename(undo["from"], undo["to"]); err != nil {
+		if err := restoreFile(undo["from"], undo["to"], undo["sha256"]); err != nil {
 			return Result{Message: fmt.Sprintf("could not restore the startup item: %v", err)}
 		}
 		return Result{OK: true, Message: "Restored the startup item."}

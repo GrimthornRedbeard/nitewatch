@@ -43,6 +43,7 @@ import (
 	"github.com/threattape/nitewatch/agent/internal/recon"
 	"github.com/threattape/nitewatch/agent/internal/respond"
 	"github.com/threattape/nitewatch/agent/internal/rules"
+	"github.com/threattape/nitewatch/agent/internal/seal"
 	"github.com/threattape/nitewatch/agent/internal/settings"
 	"github.com/threattape/nitewatch/agent/internal/source"
 	"github.com/threattape/nitewatch/agent/internal/tip"
@@ -54,6 +55,17 @@ var version = "0.1.8-pre"
 // build is resolved once at startup. Go initialises it after version, since it
 // depends on it, so a version set at link time is still picked up.
 var build = buildinfo.Read(version)
+
+// dashboardLink is the address the agent opens. The token rides in the URL
+// fragment (#t=…): fragments are never sent in a request or a Referer header,
+// and the page removes it from the address bar on load.
+func dashboardLink(addr string, tok *api.Token) string {
+	u := "http://" + addr + "/"
+	if v := tok.Value(); v != "" {
+		u += "#t=" + v
+	}
+	return u
+}
 
 // baseDir is the directory the agent keeps its files in — next to the exe, so
 // there are no %ProgramData% permission variables to reason about during
@@ -174,8 +186,10 @@ func exportKeystone(dbPath, out, host string, limit int) error {
 		_, err = os.Stdout.Write(b)
 		return err
 	}
-	// Owner-only: the export names every program on the machine and every
-	// place it went, with full paths that include the user's name.
+	// 0600 is owner-only on Unix. On Windows Go's mode bits do not become an
+	// ACL: the file inherits the permissions of the folder it is written to.
+	// The export names every program on the machine and every place it went,
+	// so choose that folder accordingly.
 	if err := os.WriteFile(out, b, 0o600); err != nil {
 		return err
 	}
@@ -197,6 +211,18 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 	}
 	defer led.Close()
 	log.Printf("ledger: ready")
+
+	// Seal what the agent writes, so the elevated process acts only on alert
+	// and action rows it recorded itself — the ledger file is usually
+	// writable by the signed-in user. See package seal.
+	if key, where, err := seal.Persistent(); err == nil {
+		led.SetSealer(key)
+		log.Printf("records: sealed with the key in %s", where)
+	} else {
+		led.SetSealer(seal.Ephemeral())
+		log.Printf("records: no protected key store (%v); using a key for this run only, "+
+			"so alerts and actions from earlier runs cannot be acted on or undone", err)
+	}
 
 	cfg, err := settings.Open(led.SQL(), seed)
 	if err != nil {
@@ -224,13 +250,23 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 			// test exercises the real rules rather than a copy of them.
 			WithSelfTest(eng, feeds).
 			WithShutdown(stop)
-		if tok, err := api.NewToken(baseDir()); err == nil {
-			srv = srv.WithToken(tok)
-			log.Printf("api: token required; stored at %s", tok.Path())
-		} else {
+		tok, err := api.NewToken(baseDir())
+		switch {
+		case tok == nil:
 			log.Printf("api: could not create an auth token (%v); the local API is unauthenticated", err)
+		case err != nil:
+			srv = srv.WithToken(tok)
+			log.Printf("api: token required; %v (the dashboard link below still works)", err)
+		default:
+			srv = srv.WithToken(tok)
+			log.Printf("api: token required; for scripts, stored at %s (readable from an elevated prompt)", tok.Path())
 		}
-		log.Printf("dashboard: http://%s", srv.Addr())
+		// The link carries the token in its fragment, which the browser never
+		// sends to the server. It goes to the console only — never to the log
+		// file, which sits in a folder other programs can read.
+		link := dashboardLink(srv.Addr(), tok)
+		log.Printf("dashboard: http://%s (open it with the link printed to the console)", srv.Addr())
+		fmt.Fprintf(os.Stderr, "\nOpen the dashboard: %s\n\n", link)
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {
 				log.Printf("server stopped: %v", err)
@@ -239,7 +275,7 @@ func run(replayPath string, serve, open bool, dbPath string, opts collector.Opti
 		if open && runtime.GOOS == "windows" {
 			go func() {
 				time.Sleep(600 * time.Millisecond) // let the listener bind
-				_ = platform.OpenBrowser("http://" + srv.Addr())
+				_ = platform.OpenBrowser(link)
 			}()
 		}
 	}
