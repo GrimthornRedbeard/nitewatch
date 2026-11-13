@@ -126,25 +126,29 @@ func TestValidateUndoRejectsTamperedRecords(t *testing.T) {
 			map[string]string{"rule": "NiteWatch block x", "ip": "not-an-ip"}},
 	}
 	for _, c := range bad {
-		if err := ValidateUndo(c.kind, c.undo, qdir); err == nil {
+		if err := ValidateUndo(c.kind, c.undo, nil, qdir); err == nil {
 			t.Errorf("%s: tampered undo record was accepted", c.name)
 		}
 	}
 
+	const hash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 	good := []struct {
-		name string
-		kind Kind
-		undo map[string]string
+		name   string
+		kind   Kind
+		undo   map[string]string
+		params map[string]string
 	}{
 		{"our own quarantine restore", QuarantineFile,
-			map[string]string{"from": qdir + `\20260726-x.exe.quarantined`, "to": `C:\Users\k\Downloads\x.exe`}},
+			map[string]string{"from": qdir + `\20260726-x.exe.quarantined`, "to": `C:\Users\k\Downloads\x.exe`, "sha256": hash},
+			map[string]string{"path": `C:\Users\k\Downloads\x.exe`}},
 		{"our own run-key restore", RemoveAutostart,
-			map[string]string{"kind": "registry", "location": `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "name": "App", "value": `C:\App\a.exe`}},
+			map[string]string{"kind": "registry", "location": `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "name": "App", "value": `C:\App\a.exe`},
+			map[string]string{"location": `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "name": "App"}},
 		{"our own firewall rule", BlockAddress,
-			map[string]string{"rule": "NiteWatch block 185.4.3.2", "ip": "185.4.3.2"}},
+			map[string]string{"rule": "NiteWatch block 185.4.3.2", "ip": "185.4.3.2"}, nil},
 	}
 	for _, c := range good {
-		if err := ValidateUndo(c.kind, c.undo, qdir); err != nil {
+		if err := ValidateUndo(c.kind, c.undo, c.params, qdir); err != nil {
 			t.Errorf("%s: legitimate undo rejected: %v", c.name, err)
 		}
 	}
@@ -152,7 +156,7 @@ func TestValidateUndoRejectsTamperedRecords(t *testing.T) {
 
 // Kill cannot be undone and must not pretend otherwise.
 func TestValidateUndoRejectsUnUndoableKinds(t *testing.T) {
-	if err := ValidateUndo(KillProcess, map[string]string{"pid": "1"}, `C:\q`); err == nil {
+	if err := ValidateUndo(KillProcess, map[string]string{"pid": "1"}, nil, `C:\q`); err == nil {
 		t.Fatal("killing a process is not reversible and must be refused")
 	}
 }

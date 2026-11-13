@@ -859,11 +859,34 @@ func (s *Server) handleActions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such alert", http.StatusNotFound)
 		return
 	}
+	// An alert the agent cannot prove it wrote is shown, never acted on.
+	if !a.Sealed {
+		writeJSON(w, map[string]any{
+			"available":  s.exec != nil,
+			"actions":    []respond.Action{},
+			"unverified": true,
+			"note":       unverifiedAlertNote,
+		})
+		return
+	}
 	acts := respond.Suggest(a.Area, a.Severity, a.Evidence)
 	writeJSON(w, map[string]any{
 		"available": s.exec != nil,
 		"actions":   acts,
 	})
+}
+
+const unverifiedAlertNote = "NiteWatch cannot confirm it recorded this alert itself " +
+	"(it predates this version, or its record was changed), so it will not act on it from here. " +
+	"If the problem is still present, NiteWatch will raise a new alert you can act on."
+
+// refuse answers an action or undo request with a reason the dashboard can
+// show. The page reads these replies as JSON, so a plain-text error would
+// surface as a parse failure instead of the reason.
+func refuse(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "message": msg})
 }
 
 // handleRunAction executes one remediation. POST only, and only ever in
@@ -887,6 +910,12 @@ func (s *Server) handleRunAction(w http.ResponseWriter, r *http.Request) {
 	a, err := s.ledger.AlertByID(alertID)
 	if err != nil {
 		http.Error(w, "no such alert", http.StatusNotFound)
+		return
+	}
+	// The alert row comes from a database the signed-in user can write, and
+	// what follows runs elevated. Only a row this agent sealed may drive it.
+	if !a.Sealed {
+		refuse(w, http.StatusConflict, unverifiedAlertNote)
 		return
 	}
 
@@ -943,13 +972,19 @@ func (s *Server) handleUndoAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(rec.Undo) == 0 {
-		http.Error(w, "that action cannot be undone", http.StatusBadRequest)
+		refuse(w, http.StatusBadRequest, "That action cannot be undone.")
 		return
 	}
-	// Undo records come back from the database, which may be user-writable.
-	// Validate structurally before acting on them with elevated privileges.
-	if err := respond.ValidateUndo(respond.Kind(rec.Kind), rec.Undo, s.quarantineDir); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	// Undo records come back from a database the signed-in user can write,
+	// and are replayed elevated. First: did this agent write the record? Then:
+	// does it only put back what its own action took away?
+	if !rec.Sealed {
+		refuse(w, http.StatusConflict, "NiteWatch cannot confirm it recorded this action itself "+
+			"(it predates this version, or its record was changed), so it will not undo it automatically.")
+		return
+	}
+	if err := respond.ValidateUndo(respond.Kind(rec.Kind), rec.Undo, rec.Params, s.quarantineDir); err != nil {
+		refuse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	res := s.exec.Undo(respond.Action{Kind: respond.Kind(rec.Kind), Params: rec.Params}, rec.Undo)
@@ -959,9 +994,14 @@ func (s *Server) handleUndoAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": res.OK, "message": res.Message})
 }
 
-// dashboardHandler serves the shell with the API token injected, so the page
-// can authenticate without the token ever appearing in a URL (where it would
-// land in browser history and Referer headers).
+// dashboardHandler serves the dashboard shell.
+//
+// The shell carries NO credential. It used to have this run's API token
+// substituted into it, which made the token available to any local process
+// that fetched "/" — so the token stopped nothing. The page now receives the
+// token from the URL fragment of the link the agent opens (#t=...), which
+// browsers never send to the server or in a Referer header; see the TOKEN
+// bootstrap in index.html.
 func (s *Server) dashboardHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" {
@@ -973,25 +1013,22 @@ func (s *Server) dashboardHandler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		body := strings.Replace(string(page), "__NITEWATCH_TOKEN__", s.token.Value(), 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// Never cache this page. Two reasons, and the second is the serious one:
+		// Never cache this page:
 		//
 		//   - It is served from an embedded filesystem whose modification time
 		//     is zero, so net/http emits no Last-Modified and no ETag. With no
 		//     validators and no freshness directives, a browser is free to keep
 		//     serving whatever it has — which is how somebody upgrades the agent
 		//     and still sees the previous version's interface.
-		//   - The page carries this run's API token, substituted above. A cached
-		//     copy holds a token from an earlier run, which is both a stale
-		//     credential sitting in the browser cache and a page that will fail
-		//     to authenticate after a restart.
+		//   - A cached shell from an older version would also carry that
+		//     version's token handling.
 		//
 		// It is a small file served over loopback. There is nothing to gain by
-		// caching it and two distinct ways for it to go wrong.
+		// caching it.
 		w.Header().Set("Cache-Control", "no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write(page)
 	})
 }
 

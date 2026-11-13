@@ -1,6 +1,6 @@
 # NiteWatch — Known Limitations
 
-**Last updated:** 2026-07-26
+**Last updated:** 2026-11-13
 
 What this software does **not** do, and where its guarantees stop. Kept because
 a security product that overstates its coverage is worse than one that admits
@@ -14,16 +14,24 @@ not.
 ### The local API cannot authenticate a local process
 
 The dashboard is served over loopback HTTP. Any process on the machine can open
-a loopback socket, and HTTP carries no identity for the caller. The API token
-(stored owner-readable beside the agent) stops:
+a loopback socket, and HTTP carries no identity for the caller, so a token is
+the whole check. The dashboard page itself does not contain the token: NiteWatch
+opens the dashboard with the token in the part of the link after `#`, which a
+browser never sends to a server, and also prints that link in its window. The
+token is also written to the `api-token` file beside the agent for scripting,
+readable only by Administrators and SYSTEM. A new token is made every time
+NiteWatch starts, so bookmarks and old links stop working after a restart.
 
-- other user accounts on a shared machine,
-- opportunistic malware that probes fixed local ports without knowing about
-  NiteWatch,
-- a web page that got past the Host check, since it cannot read a local file.
+The token stops:
 
-It does **not** stop a process running as the same user that reads the token
-file — and such a process could read the ledger database directly anyway.
+- malware that probes fixed local ports without knowing about NiteWatch,
+- a web page that got past the Host check,
+- other user accounts on a shared machine.
+
+It does **not** stop a program already running as you. Such a program can read
+your browser's memory and the link the browser was opened with, and it could
+read the ledger database directly anyway. What keeps remediation safe from it is
+described in the next section, not the token.
 
 **Proper fix:** a named pipe with an ACL, which carries caller identity at the
 OS level. Not yet implemented.
@@ -31,7 +39,7 @@ OS level. Not yet implemented.
 ### The agent runs elevated and is therefore a target
 
 ETW requires Administrator. Every input reaching an elevated process is attack
-surface. Two classes have been closed:
+surface. These classes have been closed:
 
 - **Command injection** — all data passed to PowerShell now travels through
   environment variables, never interpolated into script text. Escaping quotes
@@ -40,11 +48,24 @@ surface. Two classes have been closed:
 - **PATH hijacking** — helper binaries (powershell, taskkill, netsh, icacls)
   are invoked by absolute `%SystemRoot%\System32` path.
 
-**Still open:** the agent's own database and token live beside the executable.
-If that is a user-writable folder (a Downloads directory, say), a same-user
-attacker can tamper with them. Undo records are now structurally validated so
-a tampered record cannot become an arbitrary write, but the DB should live in
-`%ProgramData%\NiteWatch` with a restrictive ACL. **That is an installer
+- **Acting on records from a writable database** — the database lives beside
+  the executable, often in a folder you can write to, so a program running as
+  you can add or change rows in it. NiteWatch now signs every alert and action
+  it records, with a key kept in the registry where only Administrators can
+  read it. It acts only on records whose signature checks out: a row it did not
+  write is shown, but its buttons are withheld and its undo is refused. Undo is
+  also limited to putting back exactly what the action removed: a quarantined
+  file goes back only to the place it came from, never into the Windows folder,
+  and only if its contents are unchanged.
+
+**Still open:** a program running as you can still delete or hide history, and
+it can press Undo on an action NiteWatch really took (putting back a startup
+entry NiteWatch removed, say) just as you can. Also, alerts and
+actions recorded by a version before 0.1.9-pre cannot be acted on or
+undone from the dashboard (restore those by hand from the `quarantine` folder).
+If NiteWatch is not running as Administrator it cannot store its key, and then
+only the current run's alerts can be acted on. The database should still live
+in `%ProgramData%\NiteWatch` with a restrictive ACL. **That is an installer
 concern and the installer does not exist yet.**
 
 ### Detection can be evaded by anything that knows how it works

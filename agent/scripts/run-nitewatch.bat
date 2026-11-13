@@ -10,7 +10,8 @@ if %errorlevel% neq 0 (
 )
 
 cd /d "%~dp0"
-echo Starting NiteWatch... the dashboard will open at http://127.0.0.1:8973
+echo Starting NiteWatch... the dashboard will open in your browser.
+echo If it does not, use the "Open the dashboard" link printed below.
 nitewatch.exe --serve
 echo.
 echo NiteWatch stopped. Press any key to close.

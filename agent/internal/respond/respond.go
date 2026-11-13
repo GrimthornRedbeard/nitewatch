@@ -16,12 +16,15 @@
 package respond
 
 import (
+	"encoding/hex"
 	"fmt"
-	"github.com/threattape/nitewatch/agent/internal/detect"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/threattape/nitewatch/agent/internal/detect"
 )
 
 // Kind identifies what an action does.
@@ -90,6 +93,11 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 	if !detect.ActionableImage(image) {
 		image, proc = "", ""
 	}
+	// Quarantine is offered only for a path ValidateUndo would let us restore
+	// to. That excludes the Windows directory — moving a system binary can
+	// leave the machine unbootable — and any path form an undo refuses, so a
+	// quarantine is never a one-way action presented as reversible.
+	quarantinable := image != "" && safeDestination(image) == nil
 	pid := str(ev, "PID")
 	ip := str(ev, "RemoteIP")
 	dest := str(ev, "Destination")
@@ -114,7 +122,7 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 				Params:     map[string]string{"pid": pid, "image": image, "name": proc},
 			})
 		}
-		if image != "" && severity == "critical" {
+		if quarantinable && severity == "critical" {
 			out = append(out, Action{
 				Kind:       QuarantineFile,
 				Label:      "Quarantine this program",
@@ -146,7 +154,7 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 				Params:     map[string]string{"pid": pid, "image": image, "name": proc},
 			})
 		}
-		if image != "" && severity == "critical" {
+		if quarantinable && severity == "critical" {
 			out = append(out, Action{
 				Kind:       QuarantineFile,
 				Label:      "Quarantine this program",
@@ -177,7 +185,7 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 				Params:     map[string]string{"ip": ip, "dest": dest},
 			})
 		}
-		if image != "" && severity == "critical" {
+		if quarantinable && severity == "critical" {
 			out = append(out, Action{
 				Kind:       QuarantineFile,
 				Label:      "Quarantine this program",
@@ -201,7 +209,7 @@ func Suggest(area, severity string, ev map[string]any) []Action {
 				},
 			})
 		}
-		if target := str(ev, "TargetPath"); target != "" && severity == "critical" {
+		if target := str(ev, "TargetPath"); target != "" && safeDestination(target) == nil && severity == "critical" {
 			out = append(out, Action{
 				Kind:       QuarantineFile,
 				Label:      "Quarantine this program",
@@ -267,14 +275,22 @@ func str(m map[string]any, k string) string {
 // to perform.
 //
 // SECURITY: undo records are read back from the ledger database and then acted
-// on with the agent's (elevated) privileges. If an attacker can write that
-// file — and it lives beside the agent, which may be a user-writable folder —
-// then unvalidated records are an arbitrary file-move and registry-write
-// primitive running as SYSTEM. Structural validation is used rather than
-// signing because it needs no secret and survives a database that is restored,
-// copied or edited: we simply refuse to reverse anything that does not look
-// like something we could have done.
-func ValidateUndo(kind Kind, undo map[string]string, quarantineDir string) error {
+// on with the agent's elevated privileges. The primary defence is the seal:
+// the server refuses any record the agent did not write itself (see package
+// seal). This function is the second line. It bounds what even a genuine
+// record may do, so a record is only ever able to put back what its own action
+// took away:
+//
+//   - a quarantined file goes back to the exact path the action recorded, never
+//     into the Windows directory, and only with the content hash recorded when
+//     it was quarantined (the quarantine folder is user-writable);
+//   - a startup-folder item goes back to its own name in a Startup folder;
+//   - a registry value goes back under the location and name the action
+//     removed, and in the high-risk keys (Winlogon, AppInit, IFEO) only with
+//     exactly the value the alert recorded.
+//
+// params is the action's own Params from the same record.
+func ValidateUndo(kind Kind, undo, params map[string]string, quarantineDir string) error {
 	switch kind {
 	case BlockAddress:
 		rule, ip := undo["rule"], undo["ip"]
@@ -294,12 +310,18 @@ func ValidateUndo(kind Kind, undo map[string]string, quarantineDir string) error
 			return fmt.Errorf("undo record is incomplete")
 		}
 		// The source must be inside our own quarantine directory: otherwise
-		// this becomes "move any file anywhere", as SYSTEM.
+		// this becomes "move any file anywhere", elevated.
 		if !underDir(from, quarantineDir) {
 			return fmt.Errorf("refusing to restore from outside the quarantine folder")
 		}
-		if _, ok := normWin(to); !ok {
-			return fmt.Errorf("undo record has an unsafe destination")
+		if err := safeDestination(to); err != nil {
+			return err
+		}
+		if !samePath(to, params["path"]) {
+			return fmt.Errorf("refusing to restore anywhere but where the file came from")
+		}
+		if !validSHA256(undo["sha256"]) {
+			return fmt.Errorf("undo record has no content hash")
 		}
 		return nil
 
@@ -309,21 +331,113 @@ func ValidateUndo(kind Kind, undo map[string]string, quarantineDir string) error
 			if !underDir(undo["from"], quarantineDir) {
 				return fmt.Errorf("refusing to restore from outside the quarantine folder")
 			}
+			loc, name := params["location"], params["name"]
+			if name == "" || strings.ContainsAny(name, `\/:`) || !isStartupFolder(loc) {
+				return fmt.Errorf("undo record does not name a Startup folder item")
+			}
+			if err := safeDestination(undo["to"]); err != nil {
+				return err
+			}
+			if !samePath(undo["to"], loc+`\`+name) {
+				return fmt.Errorf("refusing to restore anywhere but where the item came from")
+			}
+			if !validSHA256(undo["sha256"]) {
+				return fmt.Errorf("undo record has no content hash")
+			}
 			return nil
 		case "registry":
-			// Only autostart locations may be written back, so a tampered
-			// record cannot install a service or rewrite an unrelated key.
-			if !knownAutostartKey(undo["location"]) {
+			loc, name := undo["location"], undo["name"]
+			// Only autostart locations may be written back, so a record cannot
+			// install a service or rewrite an unrelated key.
+			if !knownAutostartKey(loc) {
 				return fmt.Errorf("refusing to write outside known startup locations")
 			}
-			if undo["name"] == "" {
+			if name == "" {
 				return fmt.Errorf("undo record has no value name")
+			}
+			if !strings.EqualFold(strings.TrimSpace(loc), strings.TrimSpace(params["location"])) ||
+				!strings.EqualFold(name, params["name"]) {
+				return fmt.Errorf("refusing to restore a value the action did not remove")
+			}
+			// In these keys a value is executed elevated or by every user, so
+			// the only acceptable restore is the exact value the alert saw.
+			if highRiskAutostartKey(loc) && undo["value"] != params["target"] {
+				return fmt.Errorf("refusing to restore a value other than the one recorded in the alert")
 			}
 			return nil
 		}
 		return fmt.Errorf("unrecognised undo record")
 	}
 	return fmt.Errorf("this action cannot be undone")
+}
+
+// InWindowsDir reports whether p is inside the Windows directory
+// (%SystemRoot%, by default C:\Windows). Nothing is quarantined from there or
+// restored into it.
+func InWindowsDir(p string) bool {
+	for _, root := range windowsRoots() {
+		if underDir(p, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func windowsRoots() []string {
+	roots := []string{`C:\Windows`}
+	for _, env := range []string{"SystemRoot", "windir"} {
+		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
+			roots = append(roots, v)
+		}
+	}
+	return roots
+}
+
+// safeDestination rejects restore targets that are not plain drive-absolute
+// paths, or that sit in the Windows directory.
+//
+// Win32 path normalisation strips trailing dots and spaces from components and
+// treats a colon after the drive as an alternate data stream, so
+// "C:\Windows.\System32" would slip past a prefix check. Such paths are
+// refused outright rather than normalised: no file NiteWatch quarantined could
+// have been recorded under one.
+func safeDestination(p string) error {
+	n, ok := normWin(p)
+	if !ok {
+		return fmt.Errorf("undo record has an unsafe destination")
+	}
+	if len(n) < 3 || n[0] < 'a' || n[0] > 'z' || n[1] != ':' || n[2] != '\\' {
+		return fmt.Errorf("undo record has an unsafe destination")
+	}
+	for _, seg := range strings.Split(n[3:], `\`) {
+		if seg == "" || seg == "." || strings.HasSuffix(seg, ".") || strings.HasSuffix(seg, " ") ||
+			strings.ContainsAny(seg, `:*?"<>|`) {
+			return fmt.Errorf("undo record has an unsafe destination")
+		}
+	}
+	if InWindowsDir(n) {
+		return fmt.Errorf("refusing to restore into the Windows folder")
+	}
+	return nil
+}
+
+func samePath(a, b string) bool {
+	na, okA := normWin(a)
+	nb, okB := normWin(b)
+	return okA && okB && na != "" && na == nb
+}
+
+func isStartupFolder(loc string) bool {
+	n, ok := normWin(loc)
+	return ok && strings.HasSuffix(strings.TrimSuffix(n, `\`), `\microsoft\windows\start menu\programs\startup`)
+}
+
+func validSHA256(h string) bool {
+	if len(h) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(h)
+	return err == nil
 }
 
 // ruleNameFor must match the executor's naming exactly; it is the check that
@@ -340,6 +454,26 @@ var autostartKeyPrefixes = []string{
 	`hklm\software\microsoft\windows nt\currentversion\winlogon`,
 	`hklm\software\microsoft\windows nt\currentversion\windows`,
 	`hklm\software\microsoft\windows nt\currentversion\image file execution options`,
+}
+
+// highRiskAutostartKeys hold values that run elevated or for every user:
+// Winlogon's Shell/Userinit, AppInit_DLLs (loaded into every GUI process,
+// elevated ones included), and IFEO debuggers (launched in place of the target,
+// with its privileges).
+var highRiskAutostartKeys = []string{
+	`hklm\software\microsoft\windows nt\currentversion\winlogon`,
+	`hklm\software\microsoft\windows nt\currentversion\windows`,
+	`hklm\software\microsoft\windows nt\currentversion\image file execution options`,
+}
+
+func highRiskAutostartKey(loc string) bool {
+	l := strings.ToLower(strings.TrimSpace(loc))
+	for _, p := range highRiskAutostartKeys {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func knownAutostartKey(loc string) bool {

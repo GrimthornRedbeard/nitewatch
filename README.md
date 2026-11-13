@@ -105,8 +105,10 @@ only way to check on a machine without Go.
 nitewatch.exe --serve
 ```
 
-Or double-click `run-nitewatch.bat`, which requests elevation for you. Then
-open <http://127.0.0.1:8973>.
+Or double-click `run-nitewatch.bat`, which requests elevation for you. The
+agent opens the dashboard itself; if it does not, use the `Open the dashboard`
+link it prints. The plain address <http://127.0.0.1:8973> is not enough on its
+own: the link carries this run's API token after `#`.
 
 **Dev/demo (any OS)** — replay a recorded trace, no elevation needed:
 
