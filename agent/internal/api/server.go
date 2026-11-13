@@ -878,7 +878,7 @@ func (s *Server) handleActions(w http.ResponseWriter, r *http.Request) {
 
 const unverifiedAlertNote = "NiteWatch cannot confirm it recorded this alert itself " +
 	"(it predates this version, or its record was changed), so it will not act on it from here. " +
-	"If the problem is still present, NiteWatch will raise a new alert you can act on."
+	"If NiteWatch sees the problem again it raises a new alert you can act on; otherwise deal with it by hand."
 
 // refuse answers an action or undo request with a reason the dashboard can
 // show. The page reads these replies as JSON, so a plain-text error would
