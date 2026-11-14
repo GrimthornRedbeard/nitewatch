@@ -72,26 +72,17 @@ _Each entry stands on its own: you should be able to answer it without opening a
 
 **Recommendation.** File only, and have Keystone adopt `nitewatch.story/v1` as written (it can add optional fields without a version change). It fits engagement-style use — collect a machine's export during an assessment — which is how engagement-kit would use it, and it costs NiteWatch nothing it promised.
 
-### Should the November code review stay in nitewatch's public repo?
-
-- **Status:** open · **Added:** 2026-11-13 · **Reversible:** no (it has already been public)
-- **Blocked:** Nothing.
-
-**Background.** nitewatch's GitHub repo is public. On 2026-11-13 the November code review (`docs/reviews/CODE_REVIEW_2026-11.md`, PR #12) was merged there before anyone noticed, and it described two then-unfixed holes: the dashboard handed its API token to any local caller, and the elevated agent trusted records the ordinary user could edit. Both were fixed (PR #13) and v0.1.9-pre was published the same evening, so the live download no longer has them. The document still lists other open findings, and anyone still on 0.1.8-pre remains exposed.
-
-**Options**
-
-| Option | Pros | Cons | Effort |
-|---|---|---|---|
-| Keep it (fixes are released; the record is honest) | Transparent; normal for open-source projects | Points at weaknesses in builds people may still run | none |
-| Remove it from main | Less visible going forward | Still in git history; looks like hiding | hours |
-| Rewrite history to purge it | Gone from the repo | Force-push on a public repo; forks/caches may keep it anyway | hours |
-
-**Recommendation.** Keep it: both serious holes are fixed in the live release, and removing it would not undo the exposure. Going forward, review documents for public repos should hold security detail back until it is fixed.
-
 ## Decisions Resolved
 
 _Answered decisions, newest first. Kept rather than deleted: the record of what was decided and why is the point._
+
+### Should the November code review stay in nitewatch's public repo?
+
+- **Resolved 2026-11-14** by Kevin
+- **Decision:** Keep `docs/reviews/CODE_REVIEW_2026-11.md` in the public repo as it is: no removal from main, no history rewrite. **Forward rule:** a review document for a PUBLIC repo holds security detail back until it is fixed — unfixed security findings are kept out of the public repo (and out of its public issues and PRs) and added to the public document only once the fix is released.
+- **Why:** Kevin accepted the recommendation ("go with your recommendations on all ten decisions"). Both serious holes the document described were fixed and released in v0.1.9-pre the same evening, so the live download no longer has them; the document was already public and in git history and forks/caches, so removing it would not undo the exposure, would look like hiding, and a history rewrite would mean force-pushing a public repo. The lesson is about timing, not the document: the exposure came from publishing unfixed security detail, which the forward rule prevents.
+
+**Background.** nitewatch's GitHub repo is public. On 2026-11-13 the November code review (`docs/reviews/CODE_REVIEW_2026-11.md`, PR #12) was merged there before anyone noticed, and it described two then-unfixed holes: the dashboard handed its API token to any local caller, and the elevated agent trusted records the ordinary user could edit. Both were fixed (PR #13) and v0.1.9-pre was published the same evening, so the live download no longer has them. The document still lists other open findings, and anyone still on 0.1.8-pre remains exposed.
 
 ### Publish NiteWatch 0.1.8-pre now, so the public download picks up a security toolchain update and two bug fixes?
 
